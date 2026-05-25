@@ -104,10 +104,21 @@ class Page(BaseModel):
     spans: list[TextSpan] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _validate_span_pages(self) -> "Page":
+    def _validate_spans(self) -> "Page":
+        seen_reading_orders: set[int] = set()
+        seen_span_ids: set[SpanId] = set()
+
         for span in self.spans:
             if span.page_number != self.page_number:
                 raise ValueError("span page_number must match containing page")
+            if span.reading_order in seen_reading_orders:
+                raise ValueError("duplicate span reading_order on page")
+            if span.span_id in seen_span_ids:
+                raise ValueError("duplicate span_id on page")
+
+            seen_reading_orders.add(span.reading_order)
+            seen_span_ids.add(span.span_id)
+
         return self
 
 
@@ -134,12 +145,29 @@ class DocumentIR(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _validate_span_offsets(self) -> "DocumentIR":
+    def _validate_document_structure(self) -> "DocumentIR":
         content_length = len(self.content)
+        seen_page_numbers: set[int] = set()
+        seen_page_ids: set[PageId] = set()
+        seen_span_ids: set[SpanId] = set()
+
         for page in self.pages:
+            if page.page_number in seen_page_numbers:
+                raise ValueError("duplicate page_number")
+            if page.page_id in seen_page_ids:
+                raise ValueError("duplicate page_id")
+
+            seen_page_numbers.add(page.page_number)
+            seen_page_ids.add(page.page_id)
+
             for span in page.spans:
+                if span.span_id in seen_span_ids:
+                    raise ValueError("duplicate span_id in document")
                 if span.char_end > content_length:
                     raise ValueError("span char_end exceeds document content length")
                 if self.content[span.char_start : span.char_end] != span.text:
                     raise ValueError("span text must match document content at char range")
+
+                seen_span_ids.add(span.span_id)
+
         return self
