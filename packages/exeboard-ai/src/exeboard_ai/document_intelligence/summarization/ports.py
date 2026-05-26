@@ -15,11 +15,20 @@ class StructuredGenerationRequest(BaseModel):
     operation_name: str
     prompt_name: str
     prompt_version: str
+    output_schema_name: str
+    output_schema_version: str
     prompt: str
     replay_key: str | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
 
-    @field_validator("operation_name", "prompt_name", "prompt_version", "prompt")
+    @field_validator(
+        "operation_name",
+        "prompt_name",
+        "prompt_version",
+        "output_schema_name",
+        "output_schema_version",
+        "prompt",
+    )
     @classmethod
     def _must_not_be_empty(cls, value: str) -> str:
         if not value:

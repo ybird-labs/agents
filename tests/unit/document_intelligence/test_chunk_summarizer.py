@@ -7,6 +7,8 @@ from exeboard_ai.document_intelligence.chunking.models import Chunk
 from exeboard_ai.document_intelligence.core.ids import make_chunk_id, make_claim_id, make_span_id
 from exeboard_ai.document_intelligence.summarization.chunk_summarizer import (
     CHUNK_SUMMARY_OPERATION_NAME,
+    CHUNK_SUMMARY_OUTPUT_SCHEMA_NAME,
+    CHUNK_SUMMARY_OUTPUT_SCHEMA_VERSION,
     summarize_chunk,
 )
 from exeboard_ai.document_intelligence.summarization.models import ChunkSummary
@@ -86,9 +88,20 @@ def test_summarize_chunk_sends_request_and_private_schema_to_generator() -> None
     assert generator.seen_request.operation_name == CHUNK_SUMMARY_OPERATION_NAME
     assert generator.seen_request.prompt_name == CHUNK_SUMMARY_PROMPT_NAME
     assert generator.seen_request.prompt_version == CHUNK_SUMMARY_PROMPT_VERSION
+    assert generator.seen_request.output_schema_name == CHUNK_SUMMARY_OUTPUT_SCHEMA_NAME
+    assert generator.seen_request.output_schema_version == CHUNK_SUMMARY_OUTPUT_SCHEMA_VERSION
     assert generator.seen_request.replay_key is not None
     assert generator.seen_request.replay_key.startswith(
-        f"{CHUNK_SUMMARY_OPERATION_NAME}:{CHUNK_SUMMARY_PROMPT_NAME}:{CHUNK_SUMMARY_PROMPT_VERSION}:"
+        ":".join(
+            [
+                CHUNK_SUMMARY_OPERATION_NAME,
+                CHUNK_SUMMARY_PROMPT_NAME,
+                CHUNK_SUMMARY_PROMPT_VERSION,
+                CHUNK_SUMMARY_OUTPUT_SCHEMA_NAME,
+                CHUNK_SUMMARY_OUTPUT_SCHEMA_VERSION,
+                "",
+            ]
+        )
     )
     replay_key_digest = generator.seen_request.replay_key.rsplit(":", maxsplit=1)[1]
     assert len(replay_key_digest) == 64

@@ -25,6 +25,8 @@ from exeboard_ai.document_intelligence.summarization.prompts import (
 )
 
 CHUNK_SUMMARY_OPERATION_NAME = "document_intelligence.chunk_summary"
+CHUNK_SUMMARY_OUTPUT_SCHEMA_NAME = "chunk_summary_proposal"
+CHUNK_SUMMARY_OUTPUT_SCHEMA_VERSION = "0.1"
 
 
 class _GeneratedClaimEvidence(BaseModel):
@@ -109,6 +111,8 @@ def summarize_chunk(
         operation_name=CHUNK_SUMMARY_OPERATION_NAME,
         prompt_name=CHUNK_SUMMARY_PROMPT_NAME,
         prompt_version=CHUNK_SUMMARY_PROMPT_VERSION,
+        output_schema_name=CHUNK_SUMMARY_OUTPUT_SCHEMA_NAME,
+        output_schema_version=CHUNK_SUMMARY_OUTPUT_SCHEMA_VERSION,
         prompt=prompt,
         replay_key=_make_chunk_summary_replay_key(
             chunk=chunk,
@@ -158,6 +162,8 @@ def _make_chunk_summary_replay_key(
         "document_id": chunk.document_id,
         "chunk_id": chunk.chunk_id,
         "document_type": document_type,
+        "output_schema_name": CHUNK_SUMMARY_OUTPUT_SCHEMA_NAME,
+        "output_schema_version": CHUNK_SUMMARY_OUTPUT_SCHEMA_VERSION,
         "page_numbers": chunk.page_numbers,
         "source_span_ids": chunk.source_span_ids,
         "chunk_text": chunk.text,
@@ -165,7 +171,16 @@ def _make_chunk_summary_replay_key(
         "output_schema_sha256": output_schema_fingerprint,
     }
     digest = _sha256_json(replay_payload)
-    return f"{CHUNK_SUMMARY_OPERATION_NAME}:{CHUNK_SUMMARY_PROMPT_NAME}:{CHUNK_SUMMARY_PROMPT_VERSION}:{digest}"
+    return ":".join(
+        [
+            CHUNK_SUMMARY_OPERATION_NAME,
+            CHUNK_SUMMARY_PROMPT_NAME,
+            CHUNK_SUMMARY_PROMPT_VERSION,
+            CHUNK_SUMMARY_OUTPUT_SCHEMA_NAME,
+            CHUNK_SUMMARY_OUTPUT_SCHEMA_VERSION,
+            digest,
+        ]
+    )
 
 
 def _sha256_text(value: str) -> str:

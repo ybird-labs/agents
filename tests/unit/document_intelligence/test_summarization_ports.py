@@ -33,6 +33,19 @@ class FakeStructuredResponseGenerator:
         return output_model.model_validate(self.payload)
 
 
+def _request(**overrides: object) -> StructuredGenerationRequest:
+    data = {
+        "operation_name": "document_intelligence.chunk_summary",
+        "prompt_name": "chunk_summary",
+        "prompt_version": "0.1",
+        "output_schema_name": "chunk_summary_proposal",
+        "output_schema_version": "0.1",
+        "prompt": "Summarize this chunk.",
+    }
+    data.update(overrides)
+    return StructuredGenerationRequest(**data)
+
+
 def _generate_with(
     generator: StructuredResponseGenerator,
     *,
@@ -46,11 +59,7 @@ def test_structured_response_generator_protocol_accepts_structural_generator() -
     generator = FakeStructuredResponseGenerator(
         {"answer": "Revenue increased.", "confidence": 0.9}
     )
-    request = StructuredGenerationRequest(
-        operation_name="document_intelligence.chunk_summary",
-        prompt_name="chunk_summary",
-        prompt_version="0.1",
-        prompt="Summarize this chunk.",
+    request = _request(
         replay_key="doc:chunk:chunk_summary:0.1",
         metadata={"chunk_id": "chunk-1"},
     )
@@ -66,49 +75,33 @@ def test_structured_response_generator_protocol_accepts_structural_generator() -
     assert generator.seen_output_model is ExampleStructuredResponse
 
 
-@pytest.mark.parametrize("field", ["operation_name", "prompt_name", "prompt_version", "prompt"])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "operation_name",
+        "prompt_name",
+        "prompt_version",
+        "output_schema_name",
+        "output_schema_version",
+        "prompt",
+    ],
+)
 def test_structured_generation_request_rejects_blank_required_fields(field: str) -> None:
-    data = {
-        "operation_name": "document_intelligence.chunk_summary",
-        "prompt_name": "chunk_summary",
-        "prompt_version": "0.1",
-        "prompt": "Summarize this chunk.",
-    }
-    data[field] = "   "
-
     with pytest.raises(ValidationError, match="must not be empty"):
-        StructuredGenerationRequest(**data)
+        _request(**{field: "   "})
 
 
 def test_structured_generation_request_rejects_blank_replay_key() -> None:
     with pytest.raises(ValidationError, match="replay_key must not be empty"):
-        StructuredGenerationRequest(
-            operation_name="document_intelligence.chunk_summary",
-            prompt_name="chunk_summary",
-            prompt_version="0.1",
-            prompt="Summarize this chunk.",
-            replay_key="   ",
-        )
+        _request(replay_key="   ")
 
 
 def test_structured_generation_request_rejects_blank_metadata_keys_and_values() -> None:
     with pytest.raises(ValidationError, match="metadata keys must not be empty"):
-        StructuredGenerationRequest(
-            operation_name="document_intelligence.chunk_summary",
-            prompt_name="chunk_summary",
-            prompt_version="0.1",
-            prompt="Summarize this chunk.",
-            metadata={"   ": "value"},
-        )
+        _request(metadata={"   ": "value"})
 
     with pytest.raises(ValidationError, match="metadata values must not be empty"):
-        StructuredGenerationRequest(
-            operation_name="document_intelligence.chunk_summary",
-            prompt_name="chunk_summary",
-            prompt_version="0.1",
-            prompt="Summarize this chunk.",
-            metadata={"key": "   "},
-        )
+        _request(metadata={"key": "   "})
 
 
 def test_structured_generation_request_forbids_extra_fields() -> None:
@@ -118,6 +111,8 @@ def test_structured_generation_request_forbids_extra_fields() -> None:
                 "operation_name": "document_intelligence.chunk_summary",
                 "prompt_name": "chunk_summary",
                 "prompt_version": "0.1",
+                "output_schema_name": "chunk_summary_proposal",
+                "output_schema_version": "0.1",
                 "prompt": "Summarize this chunk.",
                 "model_name": "provider-owned-metadata",
             }
