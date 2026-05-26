@@ -6,6 +6,8 @@ from exeboard_ai.document_intelligence.core.ids import (
     make_document_id_from_file_name,
     make_page_id,
     make_span_id,
+    parse_page_id,
+    parse_span_id,
     validate_document_id,
 )
 
@@ -44,6 +46,40 @@ def test_make_page_id_is_deterministic() -> None:
 
 def test_make_span_id_includes_document_page_and_span_index() -> None:
     assert make_span_id(DOCUMENT_ID, 1, 0) == f"{DOCUMENT_ID}:p0001:s0000"
+
+
+def test_parse_page_id_extracts_document_and_page() -> None:
+    assert parse_page_id(f"{DOCUMENT_ID}:p0001") == (DOCUMENT_ID, 1)
+
+
+def test_parse_span_id_extracts_document_page_and_span_index() -> None:
+    assert parse_span_id(f"{DOCUMENT_ID}:p0001:s0002") == (DOCUMENT_ID, 1, 2)
+
+
+@pytest.mark.parametrize(
+    "page_id",
+    [
+        "not-a-page-id",
+        f"{DOCUMENT_ID}:page0001",
+        f"{DOCUMENT_ID}:p0000",
+    ],
+)
+def test_parse_page_id_rejects_malformed_values(page_id: str) -> None:
+    with pytest.raises(ValueError):
+        parse_page_id(page_id)
+
+
+@pytest.mark.parametrize(
+    "span_id",
+    [
+        "not-a-span-id",
+        f"{DOCUMENT_ID}:p0001:span0000",
+        f"{DOCUMENT_ID}:p0000:s0000",
+    ],
+)
+def test_parse_span_id_rejects_malformed_values(span_id: str) -> None:
+    with pytest.raises(ValueError):
+        parse_span_id(span_id)
 
 
 def test_make_chunk_id_is_deterministic() -> None:

@@ -160,6 +160,56 @@ def test_bounding_box_rejects_inverted_coordinates() -> None:
         BoundingBox(x0=10, y0=0, x1=5, y1=1)
 
 
+def test_document_rejects_page_id_that_does_not_match_document_and_page() -> None:
+    with pytest.raises(ValidationError, match="page_id must match document_id and page_number"):
+        DocumentIR(
+            document_id=DOCUMENT_ID,
+            source=DocumentSource(file_name=f"{DOCUMENT_ID}.pdf", file_extension="pdf"),
+            content="Alpha",
+            pages=[
+                Page(
+                    page_id=make_page_id(DOCUMENT_ID, 2),
+                    page_number=1,
+                    spans=[
+                        TextSpan(
+                            span_id=make_span_id(DOCUMENT_ID, 1, 0),
+                            page_number=1,
+                            text="Alpha",
+                            char_start=0,
+                            char_end=5,
+                            reading_order=0,
+                        )
+                    ],
+                )
+            ],
+        )
+
+
+def test_document_rejects_span_id_that_does_not_match_document_and_page() -> None:
+    with pytest.raises(ValidationError, match="span_id must match document_id and span page_number"):
+        DocumentIR(
+            document_id=DOCUMENT_ID,
+            source=DocumentSource(file_name=f"{DOCUMENT_ID}.pdf", file_extension="pdf"),
+            content="Alpha",
+            pages=[
+                Page(
+                    page_id=make_page_id(DOCUMENT_ID, 1),
+                    page_number=1,
+                    spans=[
+                        TextSpan(
+                            span_id=make_span_id(DOCUMENT_ID, 2, 0),
+                            page_number=1,
+                            text="Alpha",
+                            char_start=0,
+                            char_end=5,
+                            reading_order=0,
+                        )
+                    ],
+                )
+            ],
+        )
+
+
 def test_file_extension_is_normalized() -> None:
     source = DocumentSource(file_name=f"{DOCUMENT_ID}.PDF", file_extension=".PDF")
 

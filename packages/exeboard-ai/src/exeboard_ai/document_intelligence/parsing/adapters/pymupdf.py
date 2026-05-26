@@ -1,4 +1,5 @@
 from hashlib import sha256
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,11 @@ from exeboard_ai.document_intelligence.ir.models import (
     ParserRun,
     TextSpan,
 )
+from exeboard_ai.document_intelligence.parsing.ports import (
+    EncryptedDocumentError,
+    NoExtractableTextError,
+    UnreadableDocumentError,
+)
 
 PYMUPDF_TEXT_PARSER_RUN_ID = "pymupdf:text"
 PARSER_NAME = "pymupdf"
@@ -26,15 +32,18 @@ PARSER_NAME = "pymupdf"
 class PyMuPDFParser:
     def parse(self, path: Path) -> DocumentIR:
         document_id = make_document_id_from_file_name(path.name)
-        source = _make_document_source(path)
+        try:
+            source = _make_document_source(path)
+        except OSError as exc:
+            raise UnreadableDocumentError(f"failed to read PDF: {path}") from exc
         pages: list[Page] = []
         content_parts: list[str] = []
         warnings: list[str] = []
         empty_page_numbers: list[int] = []
 
-        with pymupdf.open(path) as pdf:
+        with _open_pdf(path) as pdf:
             if pdf.needs_pass:
-                raise ValueError("encrypted PDFs require a password")
+                raise EncryptedDocumentError("encrypted PDFs require a password")
 
             parser_version = _get_pymupdf_version()
 
@@ -54,8 +63,8 @@ class PyMuPDFParser:
                     Page(
                         page_id=make_page_id(document_id, page_number),
                         page_number=page_number,
-                        width=float(pdf_page.rect.width),
-                        height=float(pdf_page.rect.height),
+                        width=float(pdf_page.cropbox.width),
+                        height=float(pdf_page.cropbox.height),
                         rotation=int(pdf_page.rotation),
                         spans=page_spans,
                     )
@@ -65,7 +74,7 @@ class PyMuPDFParser:
             pages_text = ", ".join(str(page_number) for page_number in empty_page_numbers)
             warnings.append(f"no text extracted on pages: {pages_text}; OCR was not attempted")
         if not content_parts:
-            warnings.append("no text extracted; OCR was not attempted")
+            raise NoExtractableTextError("no extractable text found; OCR was not attempted")
 
         return DocumentIR(
             document_id=document_id,
@@ -91,6 +100,13 @@ def _make_document_source(path: Path) -> DocumentSource:
         source_uri=str(path),
         content_sha256=sha256(path.read_bytes()).hexdigest(),
     )
+
+
+def _open_pdf(path: Path) -> Any:
+    try:
+        return pymupdf.open(path)
+    except (pymupdf.EmptyFileError, pymupdf.FileDataError, pymupdf.FileNotFoundError) as exc:
+        raise UnreadableDocumentError(f"failed to open PDF: {path}") from exc
 
 
 def _extract_page_spans(
@@ -145,8 +161,14 @@ def _make_bounding_box(line: dict[str, Any]) -> BoundingBox | None:
     if bbox is None or len(bbox) != 4:
         return None
 
-    x0, y0, x1, y1 = (float(value) for value in bbox)
+    normalized_bbox = _coerce_bbox(bbox)
+    if normalized_bbox is None:
+        return None
+
+    x0, y0, x1, y1 = normalized_bbox
     if x1 < x0 or y1 < y0:
+        return None
+    if any(value < 0 for value in normalized_bbox):
         return None
 
     return BoundingBox(x0=x0, y0=y0, x1=x1, y1=y1)
@@ -174,10 +196,25 @@ def _coerce_bbox(value: object) -> tuple[float, float, float, float] | None:
     if not isinstance(value, (list, tuple)) or len(value) != 4:
         return None
 
-    return (float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+    try:
+        bbox = (float(value[0]), float(value[1]), float(value[2]), float(value[3]))
+    except (TypeError, ValueError):
+        return None
+
+    if not all(isfinite(coordinate) for coordinate in bbox):
+        return None
+    return bbox
 
 
 def _get_pymupdf_version() -> str:
+    pymupdf_version = getattr(pymupdf, "pymupdf_version", None)
+    mupdf_version = getattr(pymupdf, "mupdf_version", None)
+
+    if pymupdf_version and mupdf_version:
+        return f"PyMuPDF {pymupdf_version}; MuPDF {mupdf_version}"
+    if pymupdf_version:
+        return f"PyMuPDF {pymupdf_version}"
+
     version = getattr(pymupdf, "version", None)
     if isinstance(version, tuple) and version:
         return str(version[0])

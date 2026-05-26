@@ -8,6 +8,12 @@ from exeboard_ai.document_intelligence.ir.span_index import SpanIndex
 from exeboard_ai.document_intelligence.parsing.adapters.pymupdf import (
     PYMUPDF_TEXT_PARSER_RUN_ID,
     PyMuPDFParser,
+    _make_bounding_box,
+)
+from exeboard_ai.document_intelligence.parsing.ports import (
+    EncryptedDocumentError,
+    NoExtractableTextError,
+    UnreadableDocumentError,
 )
 
 DOCUMENT_ID = "550e8400-e29b-41d4-a716-446655440000"
@@ -27,6 +33,42 @@ def _write_pdf(path: Path, pages: list[list[str]]) -> None:
         document.close()
 
 
+def _write_top_edge_pdf(path: Path) -> None:
+    document = pymupdf.open()
+    try:
+        page = document.new_page()
+        page.insert_text((72, 1), "Top edge text")
+        document.save(path)
+    finally:
+        document.close()
+
+
+def _write_rotated_pdf(path: Path) -> None:
+    document = pymupdf.open()
+    try:
+        page = document.new_page(width=200, height=400)
+        page.insert_text((50, 100), "Rotated page text")
+        page.set_rotation(90)
+        document.save(path)
+    finally:
+        document.close()
+
+
+def _write_encrypted_pdf(path: Path) -> None:
+    document = pymupdf.open()
+    try:
+        page = document.new_page()
+        page.insert_text((72, 72), "Encrypted text")
+        document.save(
+            path,
+            encryption=pymupdf.PDF_ENCRYPT_AES_256,
+            owner_pw="owner-password",
+            user_pw="user-password",
+        )
+    finally:
+        document.close()
+
+
 def test_pymupdf_parser_creates_document_ir_from_generated_pdf(tmp_path: Path) -> None:
     pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
     _write_pdf(
@@ -39,6 +81,7 @@ def test_pymupdf_parser_creates_document_ir_from_generated_pdf(tmp_path: Path) -
 
     document = PyMuPDFParser().parse(pdf_path)
 
+    assert document.layout is None
     assert document.document_id == DOCUMENT_ID
     assert document.source.file_name == f"{DOCUMENT_ID}.pdf"
     assert document.source.file_extension == "pdf"
@@ -51,7 +94,9 @@ def test_pymupdf_parser_creates_document_ir_from_generated_pdf(tmp_path: Path) -
     parser_run = document.parser_runs[0]
     assert parser_run.parser_run_id == PYMUPDF_TEXT_PARSER_RUN_ID
     assert parser_run.parser_name == "pymupdf"
-    assert parser_run.parser_version
+    assert parser_run.parser_version is not None
+    assert "PyMuPDF" in parser_run.parser_version
+    assert "MuPDF" in parser_run.parser_version
     assert parser_run.warnings == []
 
     assert [page.page_id for page in document.pages] == [
@@ -88,17 +133,95 @@ def test_pymupdf_parser_creates_document_ir_from_generated_pdf(tmp_path: Path) -
     assert index.get_page_text(2) == "Second page finding"
 
 
-def test_pymupdf_parser_reports_blank_pdf_without_ocr(tmp_path: Path) -> None:
+def test_pymupdf_parser_reports_partially_blank_pdf_without_ocr(tmp_path: Path) -> None:
     pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
-    _write_pdf(pdf_path, [[]])
+    _write_pdf(pdf_path, [["Text page"], []])
 
     document = PyMuPDFParser().parse(pdf_path)
 
-    assert document.content == ""
-    assert len(document.pages) == 1
-    assert document.pages[0].spans == []
-    assert "no text extracted on pages: 1; OCR was not attempted" in document.parser_runs[0].warnings
-    assert "no text extracted; OCR was not attempted" in document.parser_runs[0].warnings
+    assert document.content == "Text page"
+    assert len(document.pages) == 2
+    assert len(document.pages[0].spans) == 1
+    assert document.pages[1].spans == []
+    assert "no text extracted on pages: 2; OCR was not attempted" in document.parser_runs[0].warnings
+
+
+def test_pymupdf_parser_raises_no_extractable_text_for_blank_pdf_without_ocr(
+    tmp_path: Path,
+) -> None:
+    pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
+    _write_pdf(pdf_path, [[]])
+
+    with pytest.raises(NoExtractableTextError, match="no extractable text found"):
+        PyMuPDFParser().parse(pdf_path)
+
+
+def test_pymupdf_parser_drops_invalid_optional_text_bboxes_without_failing(
+    tmp_path: Path,
+) -> None:
+    assert _make_bounding_box({"bbox": (72, -6.825, 150, 8)}) is None
+    assert _make_bounding_box({"bbox": (72, float("nan"), 150, 8)}) is None
+
+    pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
+    _write_top_edge_pdf(pdf_path)
+
+    document = PyMuPDFParser().parse(pdf_path)
+
+    assert document.content == "Top edge text"
+    assert document.pages[0].spans[0].text == "Top edge text"
+
+
+def test_pymupdf_parser_uses_unrotated_page_dimensions_for_text_coordinates(
+    tmp_path: Path,
+) -> None:
+    pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
+    _write_rotated_pdf(pdf_path)
+
+    document = PyMuPDFParser().parse(pdf_path)
+
+    page = document.pages[0]
+    assert page.rotation == 90
+    assert page.width == 200
+    assert page.height == 400
+    assert len(page.spans) == 1
+
+    span = page.spans[0]
+    assert span.text == "Rotated page text"
+    assert document.content[span.char_start : span.char_end] == span.text
+    assert span.bbox is not None
+    assert 0 <= span.bbox.x0 <= span.bbox.x1 <= page.width
+    assert 0 <= span.bbox.y0 <= span.bbox.y1 <= page.height
+
+
+def test_pymupdf_parser_rejects_missing_pdf_with_parser_port_error(tmp_path: Path) -> None:
+    missing_pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
+
+    with pytest.raises(UnreadableDocumentError, match="failed to read PDF"):
+        PyMuPDFParser().parse(missing_pdf_path)
+
+
+def test_pymupdf_parser_rejects_empty_or_invalid_pdf(tmp_path: Path) -> None:
+    empty_pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
+    empty_pdf_path.write_bytes(b"")
+
+    with pytest.raises(UnreadableDocumentError, match="failed to open PDF"):
+        PyMuPDFParser().parse(empty_pdf_path)
+
+    invalid_pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
+    invalid_pdf_path.write_bytes(b"not a pdf")
+
+    with pytest.raises(UnreadableDocumentError, match="failed to open PDF"):
+        PyMuPDFParser().parse(invalid_pdf_path)
+
+
+def test_pymupdf_parser_rejects_encrypted_pdf_without_fake_authentication(
+    tmp_path: Path,
+) -> None:
+    pdf_path = tmp_path / f"{DOCUMENT_ID}.pdf"
+    _write_encrypted_pdf(pdf_path)
+
+    with pytest.raises(EncryptedDocumentError, match="encrypted PDFs require a password"):
+        PyMuPDFParser().parse(pdf_path)
 
 
 def test_pymupdf_parser_rejects_non_uuid_file_name(tmp_path: Path) -> None:
