@@ -1,8 +1,12 @@
 from typing import TypeVar
 
-from pydantic import BaseModel
+import pytest
+from pydantic import BaseModel, ValidationError
 
-from exeboard_ai.document_intelligence.summarization.ports import StructuredResponseGenerator
+from exeboard_ai.document_intelligence.summarization.ports import (
+    StructuredGenerationRequest,
+    StructuredResponseGenerator,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -15,16 +19,16 @@ class ExampleStructuredResponse(BaseModel):
 class FakeStructuredResponseGenerator:
     def __init__(self, payload: dict[str, object]) -> None:
         self.payload = payload
-        self.seen_prompt: str | None = None
+        self.seen_request: StructuredGenerationRequest | None = None
         self.seen_output_model: type[BaseModel] | None = None
 
     def generate(
         self,
         *,
-        prompt: str,
+        request: StructuredGenerationRequest,
         output_model: type[T],
     ) -> T:
-        self.seen_prompt = prompt
+        self.seen_request = request
         self.seen_output_model = output_model
         return output_model.model_validate(self.payload)
 
@@ -32,23 +36,89 @@ class FakeStructuredResponseGenerator:
 def _generate_with(
     generator: StructuredResponseGenerator,
     *,
-    prompt: str,
+    request: StructuredGenerationRequest,
     output_model: type[T],
 ) -> T:
-    return generator.generate(prompt=prompt, output_model=output_model)
+    return generator.generate(request=request, output_model=output_model)
 
 
 def test_structured_response_generator_protocol_accepts_structural_generator() -> None:
     generator = FakeStructuredResponseGenerator(
         {"answer": "Revenue increased.", "confidence": 0.9}
     )
+    request = StructuredGenerationRequest(
+        operation_name="document_intelligence.chunk_summary",
+        prompt_name="chunk_summary",
+        prompt_version="0.1",
+        prompt="Summarize this chunk.",
+        replay_key="doc:chunk:chunk_summary:0.1",
+        metadata={"chunk_id": "chunk-1"},
+    )
 
     response = _generate_with(
         generator,
-        prompt="Summarize this chunk.",
+        request=request,
         output_model=ExampleStructuredResponse,
     )
 
     assert response == ExampleStructuredResponse(answer="Revenue increased.", confidence=0.9)
-    assert generator.seen_prompt == "Summarize this chunk."
+    assert generator.seen_request == request
     assert generator.seen_output_model is ExampleStructuredResponse
+
+
+@pytest.mark.parametrize("field", ["operation_name", "prompt_name", "prompt_version", "prompt"])
+def test_structured_generation_request_rejects_blank_required_fields(field: str) -> None:
+    data = {
+        "operation_name": "document_intelligence.chunk_summary",
+        "prompt_name": "chunk_summary",
+        "prompt_version": "0.1",
+        "prompt": "Summarize this chunk.",
+    }
+    data[field] = "   "
+
+    with pytest.raises(ValidationError, match="must not be empty"):
+        StructuredGenerationRequest(**data)
+
+
+def test_structured_generation_request_rejects_blank_replay_key() -> None:
+    with pytest.raises(ValidationError, match="replay_key must not be empty"):
+        StructuredGenerationRequest(
+            operation_name="document_intelligence.chunk_summary",
+            prompt_name="chunk_summary",
+            prompt_version="0.1",
+            prompt="Summarize this chunk.",
+            replay_key="   ",
+        )
+
+
+def test_structured_generation_request_rejects_blank_metadata_keys_and_values() -> None:
+    with pytest.raises(ValidationError, match="metadata keys must not be empty"):
+        StructuredGenerationRequest(
+            operation_name="document_intelligence.chunk_summary",
+            prompt_name="chunk_summary",
+            prompt_version="0.1",
+            prompt="Summarize this chunk.",
+            metadata={"   ": "value"},
+        )
+
+    with pytest.raises(ValidationError, match="metadata values must not be empty"):
+        StructuredGenerationRequest(
+            operation_name="document_intelligence.chunk_summary",
+            prompt_name="chunk_summary",
+            prompt_version="0.1",
+            prompt="Summarize this chunk.",
+            metadata={"key": "   "},
+        )
+
+
+def test_structured_generation_request_forbids_extra_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        StructuredGenerationRequest.model_validate(
+            {
+                "operation_name": "document_intelligence.chunk_summary",
+                "prompt_name": "chunk_summary",
+                "prompt_version": "0.1",
+                "prompt": "Summarize this chunk.",
+                "model_name": "provider-owned-metadata",
+            }
+        )
