@@ -138,9 +138,11 @@ def test_valid_paragraph_layout_references_existing_spans() -> None:
 
     document = _document(layout=layout)
 
-    assert document.layout is layout
-    assert document.layout.blocks[0].source_span_ids == (_span_id(1, 0),)
-    assert document.layout.blocks[0].bounding_regions[0].bbox.coordinate_system == "pdf_points_top_left"
+    document_layout = document.layout
+    assert document_layout is not None
+    assert document_layout is layout
+    assert document_layout.blocks[0].source_span_ids == (_span_id(1, 0),)
+    assert document_layout.blocks[0].bounding_regions[0].bbox.coordinate_system == "pdf_points_top_left"
 
 
 def test_document_layout_parser_run_id_must_reference_existing_parser_run() -> None:
@@ -234,7 +236,9 @@ def test_bounding_box_rejects_negative_non_finite_and_extra_coordinates() -> Non
         BoundingBox(x0=0, y0=0, x1=float("inf"), y1=1)
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        BoundingBox(x0=0, y0=0, x1=1, y1=1, polygon=[0, 0, 1, 1])
+        BoundingBox.model_validate(
+            {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "polygon": [0, 0, 1, 1]}
+        )
 
 
 def test_bounding_region_page_number_must_exist_in_document_pages() -> None:
@@ -476,15 +480,17 @@ def test_parent_block_cycles_are_rejected() -> None:
     ],
 )
 def test_content_layer_accepts_required_values(layer: str) -> None:
-    block = LayoutBlock(
-        block_id=f"section-{layer}",
-        block_type=LayoutBlockType.SECTION,
-        content_layer=layer,
-        page_numbers=(1,),
-        reading_order=0,
+    block = LayoutBlock.model_validate(
+        {
+            "block_id": f"section-{layer}",
+            "block_type": LayoutBlockType.SECTION,
+            "content_layer": layer,
+            "page_numbers": (1,),
+            "reading_order": 0,
+        }
     )
 
-    assert block.content_layer == layer
+    assert block.content_layer.value == layer
 
 
 @pytest.mark.parametrize(
@@ -518,18 +524,20 @@ def test_layout_block_type_accepts_required_values(block_type: str) -> None:
         "header",
         "page_number",
     }
-    block = LayoutBlock(
-        block_id=f"block-{block_type}",
-        block_type=block_type,
-        content_layer=ContentLayer.BODY,
-        page_numbers=(1,),
-        reading_order=0,
-        source_span_ids=(_span_id(1, 0),) if block_type in text_bearing_types else (),
-        table_id="table-1" if block_type == "table" else None,
-        figure_id="figure-1" if block_type == "figure" else None,
+    block = LayoutBlock.model_validate(
+        {
+            "block_id": f"block-{block_type}",
+            "block_type": block_type,
+            "content_layer": ContentLayer.BODY,
+            "page_numbers": (1,),
+            "reading_order": 0,
+            "source_span_ids": (_span_id(1, 0),) if block_type in text_bearing_types else (),
+            "table_id": "table-1" if block_type == "table" else None,
+            "figure_id": "figure-1" if block_type == "figure" else None,
+        }
     )
 
-    assert block.block_type == block_type
+    assert block.block_type.value == block_type
 
 
 def test_header_footer_and_page_number_can_be_furniture() -> None:
@@ -563,7 +571,9 @@ def test_header_footer_and_page_number_can_be_furniture() -> None:
         layout=_layout(blocks=(header, footer, page_number)),
     )
 
-    assert [block.content_layer for block in document.layout.blocks] == [
+    document_layout = document.layout
+    assert document_layout is not None
+    assert [block.content_layer for block in document_layout.blocks] == [
         ContentLayer.FURNITURE,
         ContentLayer.FURNITURE,
         ContentLayer.FURNITURE,
@@ -606,7 +616,9 @@ def test_valid_table_wrapper_block_table_and_cell_pass() -> None:
 
     document = _document(layout=_layout(blocks=(block,), tables=(table,)))
 
-    assert document.layout.tables[0].cells[0].roles == (TableCellRole.CONTENT,)
+    document_layout = document.layout
+    assert document_layout is not None
+    assert document_layout.tables[0].cells[0].roles == (TableCellRole.CONTENT,)
 
 
 def test_table_block_table_id_mismatch_is_rejected() -> None:
@@ -693,7 +705,9 @@ def test_visual_only_figure_with_bounding_region_and_no_spans_passes() -> None:
 
     document = _document(layout=_layout(blocks=(block,), figures=(figure,)))
 
-    assert document.layout.figures[0].source_span_ids == ()
+    document_layout = document.layout
+    assert document_layout is not None
+    assert document_layout.figures[0].source_span_ids == ()
 
 
 def test_figure_without_spans_or_bounding_region_is_rejected() -> None:
@@ -792,9 +806,11 @@ def test_cross_page_non_contiguous_block_table_and_figure_can_be_represented() -
         layout=_layout(blocks=(section, table_block, figure_block), tables=(table,), figures=(figure,)),
     )
 
-    assert document.layout.blocks[0].page_numbers == (1, 3)
-    assert document.layout.tables[0].bounding_regions[1].page_number == 3
-    assert document.layout.figures[0].bounding_regions[1].page_number == 3
+    document_layout = document.layout
+    assert document_layout is not None
+    assert document_layout.blocks[0].page_numbers == (1, 3)
+    assert document_layout.tables[0].bounding_regions[1].page_number == 3
+    assert document_layout.figures[0].bounding_regions[1].page_number == 3
 
 
 def test_document_ir_with_layout_serializes_and_round_trips() -> None:
@@ -852,21 +868,25 @@ def test_document_ir_with_layout_serializes_and_round_trips() -> None:
 
 def test_extra_text_or_vendor_object_fields_are_rejected_by_layout_models() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        LayoutBlock(
-            block_id="block-1",
-            block_type=LayoutBlockType.PARAGRAPH,
-            content_layer=ContentLayer.BODY,
-            page_numbers=(1,),
-            reading_order=0,
-            source_span_ids=(_span_id(1, 0),),
-            text="duplicate authoritative text",
+        LayoutBlock.model_validate(
+            {
+                "block_id": "block-1",
+                "block_type": LayoutBlockType.PARAGRAPH,
+                "content_layer": ContentLayer.BODY,
+                "page_numbers": (1,),
+                "reading_order": 0,
+                "source_span_ids": (_span_id(1, 0),),
+                "text": "duplicate authoritative text",
+            }
         )
 
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        TableCell(
-            row_index=0,
-            column_index=0,
-            vendor_object={"raw": "parser payload"},
+        TableCell.model_validate(
+            {
+                "row_index": 0,
+                "column_index": 0,
+                "vendor_object": {"raw": "parser payload"},
+            }
         )
 
 

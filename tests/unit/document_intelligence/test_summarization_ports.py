@@ -34,7 +34,7 @@ class FakeStructuredResponseGenerator:
 
 
 def _request(**overrides: object) -> StructuredGenerationRequest:
-    data = {
+    data: dict[str, object] = {
         "operation_name": "document_intelligence.chunk_summary",
         "prompt_name": "chunk_summary",
         "prompt_version": "0.1",
@@ -43,7 +43,7 @@ def _request(**overrides: object) -> StructuredGenerationRequest:
         "prompt": "Summarize this chunk.",
     }
     data.update(overrides)
-    return StructuredGenerationRequest(**data)
+    return StructuredGenerationRequest.model_validate(data)
 
 
 def _generate_with(

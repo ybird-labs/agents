@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 import pymupdf
 import pytest
@@ -61,7 +62,7 @@ def _write_encrypted_pdf(path: Path) -> None:
         page.insert_text((72, 72), "Encrypted text")
         document.save(
             path,
-            encryption=pymupdf.PDF_ENCRYPT_AES_256,
+            encryption=cast(int, getattr(pymupdf, "PDF_ENCRYPT_AES_256")),
             owner_pw="owner-password",
             user_pw="user-password",
         )

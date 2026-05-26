@@ -114,6 +114,7 @@ def test_summarize_chunk_sends_request_and_private_schema_to_generator() -> None
     assert chunk.document_id in generator.seen_request.prompt
     assert chunk.source_span_ids[0] in generator.seen_request.prompt
     assert chunk.text in generator.seen_request.prompt
+    assert generator.seen_output_model is not None
     assert generator.seen_output_model is not ChunkSummary
     assert generator.seen_output_model.__name__ == "_GeneratedChunkSummary"
 
