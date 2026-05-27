@@ -1,0 +1,35 @@
+[project]
+name = "exeboard"
+version = "0.1.0"
+description = "Python-first multi-agent workflow platform monorepo."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+filterwarnings = [
+  "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
+  "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",
+  "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+]
+
+[tool.uv.workspace]
+members = [
+  "apps/api",
+  "apps/workers/ingestion",
+  "apps/workers/workflow",
+  "apps/workers/agent",
+  "apps/mcp-server",
+  "apps/agents/board_minutes",
+  "packages/exeboard-domain",
+  "packages/exeboard-application",
+  "packages/exeboard-platform",
+  "packages/exeboard-temporal",
+  "packages/exeboard-ai",
+  "packages/exeboard-tools",
+  "packages/exeboard-integrations",
+  "packages/exeboard-evals",
+]
