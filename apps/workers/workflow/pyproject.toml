@@ -1,0 +1,13 @@
+[project]
+name = "exeboard-worker-workflow"
+version = "0.1.0"
+description = "Workflow worker process."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+exeboard-worker-workflow = "exeboard_worker_workflow.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

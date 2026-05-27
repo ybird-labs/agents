@@ -1,0 +1,24 @@
+{
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "standard",
+  "extraPaths": [
+    "packages/exeboard-domain/src",
+    "packages/exeboard-application/src",
+    "packages/exeboard-platform/src",
+    "packages/exeboard-temporal/src",
+    "packages/exeboard-ai/src",
+    "packages/exeboard-tools/src",
+    "packages/exeboard-integrations/src",
+    "packages/exeboard-evals/src"
+  ],
+  "include": [
+    "apps",
+    "packages",
+    "tests"
+  ],
+  "exclude": [
+    ".venv",
+    ".git",
+    ".pi"
+  ]
+}

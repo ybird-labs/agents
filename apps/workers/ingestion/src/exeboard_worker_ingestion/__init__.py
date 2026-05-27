@@ -1,0 +1,1 @@
+"""Ingestion Worker application package."""

@@ -1,0 +1,13 @@
+[project]
+name = "exeboard-worker-agent"
+version = "0.1.0"
+description = "Agent worker process."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+exeboard-worker-agent = "exeboard_worker_agent.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

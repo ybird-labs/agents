@@ -1,0 +1,13 @@
+[project]
+name = "exeboard-worker-ingestion"
+version = "0.1.0"
+description = "Ingestion worker process."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+exeboard-worker-ingestion = "exeboard_worker_ingestion.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

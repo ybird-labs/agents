@@ -1,0 +1,13 @@
+[project]
+name = "exeboard-api"
+version = "0.1.0"
+description = "HTTP API service for Exeboard."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+exeboard-api = "exeboard_api.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

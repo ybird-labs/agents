@@ -1,0 +1,13 @@
+[project]
+name = "exeboard-mcp-server"
+version = "0.1.0"
+description = "MCP server exposing Exeboard tools."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+exeboard-mcp-server = "exeboard_mcp_server.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
