@@ -1,0 +1,44 @@
+{
+  "dataset_id": "document_intelligence.summary_mvp.seed.v0_1",
+  "description": "Seed grounding annotations for the evidence-backed summary MVP gate.",
+  "cases": [
+    {
+      "case_id": "single_page_business_review",
+      "document_type": "business_review",
+      "document_id": "550e8400-e29b-41d4-a716-446655440000",
+      "expected_claims": [
+        {
+          "claim": "Revenue increased.",
+          "claim_role": "finding",
+          "evidence_quote": "Revenue increased.",
+          "page_number": 1,
+          "source_span_ids": ["550e8400-e29b-41d4-a716-446655440000:p0001:s0000"],
+          "expected_validation": "valid"
+        },
+        {
+          "claim": "Costs declined.",
+          "claim_role": "finding",
+          "evidence_quote": "Costs declined.",
+          "page_number": 1,
+          "source_span_ids": ["550e8400-e29b-41d4-a716-446655440000:p0001:s0001"],
+          "expected_validation": "valid"
+        }
+      ],
+      "negative_checks": [
+        {
+          "description": "Unsupported invented quote must be excluded from final summary.",
+          "evidence_quote": "Invented quote.",
+          "expected_validation": "invalid"
+        },
+        {
+          "description": "Same-page quote cited to the wrong span must be excluded from final summary.",
+          "evidence_quote": "Costs declined.",
+          "page_number": 1,
+          "source_span_ids": ["550e8400-e29b-41d4-a716-446655440000:p0001:s0000"],
+          "expected_validation": "invalid",
+          "expected_error_code": "quote_outside_cited_spans"
+        }
+      ]
+    }
+  ]
+}

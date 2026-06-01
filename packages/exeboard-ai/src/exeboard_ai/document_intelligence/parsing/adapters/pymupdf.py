@@ -38,6 +38,7 @@ class PyMuPDFParser:
             raise UnreadableDocumentError(f"failed to read PDF: {path}") from exc
         pages: list[Page] = []
         content_parts: list[str] = []
+        char_cursor = 0
         warnings: list[str] = []
         empty_page_numbers: list[int] = []
 
@@ -50,11 +51,12 @@ class PyMuPDFParser:
             for page_index in range(pdf.page_count):
                 pdf_page = pdf.load_page(page_index)
                 page_number = page_index + 1
-                page_spans = _extract_page_spans(
+                page_spans, char_cursor = _extract_page_spans(
                     pdf_page=pdf_page,
                     document_id=document_id,
                     page_number=page_number,
                     content_parts=content_parts,
+                    char_cursor=char_cursor,
                 )
                 if not page_spans:
                     empty_page_numbers.append(page_number)
@@ -115,7 +117,8 @@ def _extract_page_spans(
     document_id: DocumentId,
     page_number: int,
     content_parts: list[str],
-) -> list[TextSpan]:
+    char_cursor: int,
+) -> tuple[list[TextSpan], int]:
     page_spans: list[TextSpan] = []
     text_dict = pdf_page.get_text("dict", sort=True, flags=_text_dict_flags())
 
@@ -130,10 +133,12 @@ def _extract_page_spans(
 
             if content_parts:
                 content_parts.append("\n")
+                char_cursor += 1
 
-            char_start = len("".join(content_parts))
+            char_start = char_cursor
             content_parts.append(line_text)
             char_end = char_start + len(line_text)
+            char_cursor = char_end
             span_index = len(page_spans)
 
             page_spans.append(
@@ -149,7 +154,7 @@ def _extract_page_spans(
                 )
             )
 
-    return page_spans
+    return page_spans, char_cursor
 
 
 def _text_dict_flags() -> int:

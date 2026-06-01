@@ -70,7 +70,7 @@ _TEXT_BEARING_BLOCK_TYPES = frozenset(
 
 
 class DocumentSource(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     file_name: str
     file_extension: str
@@ -361,7 +361,7 @@ class DocumentLayout(BaseModel):
 
 
 class ParserRun(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     parser_run_id: str
     parser_name: str
@@ -378,7 +378,7 @@ class ParserRun(BaseModel):
 
 
 class TextSpan(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     span_id: SpanId
     page_number: int = Field(ge=1)
@@ -397,7 +397,7 @@ class TextSpan(BaseModel):
 
 
 class Page(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     page_id: PageId
     page_number: int = Field(ge=1)
@@ -426,7 +426,7 @@ class Page(BaseModel):
 
 
 class DocumentIR(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True, extra="forbid")
 
     ir_version: str = IR_VERSION
     document_id: DocumentId

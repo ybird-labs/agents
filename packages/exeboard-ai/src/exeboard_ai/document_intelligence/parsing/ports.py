@@ -8,6 +8,10 @@ class DocumentParseError(Exception):
     """Base exception for parser-port failures."""
 
 
+class ParserDependencyError(DocumentParseError):
+    """Raised when an optional parser dependency is not installed or unavailable."""
+
+
 class EncryptedDocumentError(DocumentParseError):
     """Raised when a parser cannot parse an encrypted document."""
 

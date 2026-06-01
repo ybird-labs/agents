@@ -8,6 +8,7 @@ from exeboard_ai.document_intelligence.ir.models import DocumentIR, DocumentSour
 from exeboard_ai.document_intelligence.ir.span_index import SpanIndex
 
 DOCUMENT_ID = "550e8400-e29b-41d4-a716-446655440000"
+OTHER_DOCUMENT_ID = "650e8400-e29b-41d4-a716-446655440000"
 
 
 def _span(page_number: int, span_index: int, text: str, char_start: int) -> TextSpan:
@@ -57,8 +58,8 @@ def test_chunk_model_serializes_with_provenance() -> None:
         chunk_id=make_chunk_id(DOCUMENT_ID, 0),
         document_id=DOCUMENT_ID,
         text="Alpha",
-        page_numbers=[1],
-        source_span_ids=[make_span_id(DOCUMENT_ID, 1, 0)],
+        page_numbers=(1,),
+        source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),)
     )
 
     data = chunk.model_dump()
@@ -66,7 +67,7 @@ def test_chunk_model_serializes_with_provenance() -> None:
     assert data["chunk_id"] == make_chunk_id(DOCUMENT_ID, 0)
     assert data["document_id"] == DOCUMENT_ID
     assert data["chunk_type"] == "text"
-    assert data["source_span_ids"] == [make_span_id(DOCUMENT_ID, 1, 0)]
+    assert data["source_span_ids"] == (make_span_id(DOCUMENT_ID, 1, 0),)
 
 
 @pytest.mark.parametrize(
@@ -109,21 +110,65 @@ def test_chunk_model_rejects_invalid_document_id() -> None:
             chunk_id="not-a-uuid:c0000",
             document_id="not-a-uuid",
             text="Alpha",
-            page_numbers=[1],
-            source_span_ids=["span-1"],
+            page_numbers=(1,),
+            source_span_ids=("span-1",)
         )
 
 
 def test_chunk_model_rejects_chunk_id_from_another_document() -> None:
-    other_document_id = "650e8400-e29b-41d4-a716-446655440000"
-
     with pytest.raises(ValidationError, match="chunk_id must belong to document_id"):
         Chunk(
-            chunk_id=make_chunk_id(other_document_id, 0),
+            chunk_id=make_chunk_id(OTHER_DOCUMENT_ID, 0),
             document_id=DOCUMENT_ID,
             text="Alpha",
-            page_numbers=[1],
-            source_span_ids=[make_span_id(DOCUMENT_ID, 1, 0)],
+            page_numbers=(1,),
+            source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),)
+        )
+
+
+@pytest.mark.parametrize("chunk_id", [f"{DOCUMENT_ID}:cBAD", f"{DOCUMENT_ID}:c1", f"{DOCUMENT_ID}:c00001"])
+def test_chunk_model_rejects_malformed_chunk_id_suffix(chunk_id: str) -> None:
+    with pytest.raises(ValidationError, match="chunk_id must be in format"):
+        Chunk(
+            chunk_id=chunk_id,
+            document_id=DOCUMENT_ID,
+            text="Alpha",
+            page_numbers=(1,),
+            source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),)
+        )
+
+
+def test_chunk_model_accepts_large_generated_chunk_id() -> None:
+    chunk = Chunk(
+        chunk_id=make_chunk_id(DOCUMENT_ID, 10000),
+        document_id=DOCUMENT_ID,
+        text="Alpha",
+        page_numbers=(1,),
+        source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),)
+    )
+
+    assert chunk.chunk_id == f"{DOCUMENT_ID}:c10000"
+
+
+def test_chunk_model_rejects_source_span_id_from_another_document() -> None:
+    with pytest.raises(ValidationError, match="source_span_ids must belong to document_id"):
+        Chunk(
+            chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+            document_id=DOCUMENT_ID,
+            text="Alpha",
+            page_numbers=(1,),
+            source_span_ids=(make_span_id(OTHER_DOCUMENT_ID, 1, 0),)
+        )
+
+
+def test_chunk_model_rejects_page_numbers_that_do_not_match_source_spans() -> None:
+    with pytest.raises(ValidationError, match="page_numbers must match source_span_ids"):
+        Chunk(
+            chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+            document_id=DOCUMENT_ID,
+            text="Alpha",
+            page_numbers=(2,),
+            source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),)
         )
 
 
@@ -138,8 +183,8 @@ def test_chunk_document_groups_spans_in_document_order() -> None:
     ]
     assert [chunk.text for chunk in chunks] == ["Alpha\nBeta", "Gamma"]
     assert [chunk.source_span_ids for chunk in chunks] == [
-        [make_span_id(DOCUMENT_ID, 1, 0), make_span_id(DOCUMENT_ID, 1, 1)],
-        [make_span_id(DOCUMENT_ID, 1, 2)],
+        (make_span_id(DOCUMENT_ID, 1, 0), make_span_id(DOCUMENT_ID, 1, 1)),
+        (make_span_id(DOCUMENT_ID, 1, 2),),
     ]
 
 
@@ -152,7 +197,7 @@ def test_chunk_document_chunk_text_matches_span_index_reconstruction() -> None:
     assert len(chunks) == 1
     chunk = chunks[0]
     assert chunk.text == index.get_text_for_spans(chunk.source_span_ids)
-    assert chunk.page_numbers == [1, 2]
+    assert chunk.page_numbers == (1, 2)
     assert all(index.has_span(span_id) for span_id in chunk.source_span_ids)
 
 
@@ -186,11 +231,11 @@ def test_chunk_document_sorts_unsorted_pages_and_spans() -> None:
     chunks = chunk_document(document, target_chars=100, max_chars=120)
 
     assert chunks[0].text == "Alpha\nBeta\nGamma"
-    assert chunks[0].source_span_ids == [
+    assert chunks[0].source_span_ids == (
         make_span_id(DOCUMENT_ID, 1, 0),
         make_span_id(DOCUMENT_ID, 1, 1),
         make_span_id(DOCUMENT_ID, 2, 0),
-    ]
+    )
 
 
 def test_chunk_document_counts_newline_separators_against_target() -> None:
@@ -203,12 +248,11 @@ def test_chunk_document_counts_newline_separators_against_target() -> None:
     assert [chunk.text for chunk in split_chunks] == ["12345", "67890"]
 
 
-def test_chunk_document_keeps_single_overlong_span_as_own_chunk() -> None:
+def test_chunk_document_rejects_single_span_over_max_chars() -> None:
     document = _document_with_texts([["A" * 30, "Beta"]])
 
-    chunks = chunk_document(document, target_chars=10, max_chars=20)
-
-    assert [chunk.text for chunk in chunks] == ["A" * 30, "Beta"]
+    with pytest.raises(ValueError, match="exceeds max_chars"):
+        chunk_document(document, target_chars=10, max_chars=20)
 
 
 def test_chunk_document_skips_empty_spans() -> None:
@@ -232,7 +276,7 @@ def test_chunk_document_skips_empty_spans() -> None:
 
     assert len(chunks) == 1
     assert chunks[0].text == "Alpha"
-    assert chunks[0].source_span_ids == [make_span_id(DOCUMENT_ID, 1, 1)]
+    assert chunks[0].source_span_ids == (make_span_id(DOCUMENT_ID, 1, 1),)
 
 
 def test_chunk_document_returns_empty_list_for_empty_document() -> None:

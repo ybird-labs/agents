@@ -18,6 +18,11 @@ def chunk_document(
     current_spans: list[TextSpan] = []
 
     for span in spans:
+        if len(span.text) > max_chars:
+            raise ValueError(
+                f"span {span.span_id!r} exceeds max_chars ({len(span.text)} > {max_chars})"
+            )
+
         if current_spans and _projected_text_length(current_spans, span) > target_chars:
             chunks.append(_make_chunk(document, index, len(chunks), current_spans))
             current_spans = []
@@ -64,8 +69,8 @@ def _make_chunk(
     chunk_index: int,
     spans: list[TextSpan],
 ) -> Chunk:
-    source_span_ids = [span.span_id for span in spans]
-    page_numbers = sorted({span.page_number for span in spans})
+    source_span_ids = tuple(span.span_id for span in spans)
+    page_numbers = tuple(sorted({span.page_number for span in spans}))
 
     return Chunk(
         chunk_id=make_chunk_id(document.document_id, chunk_index),

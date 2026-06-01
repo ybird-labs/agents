@@ -6,6 +6,8 @@ from exeboard_ai.document_intelligence.core.ids import (
     make_document_id_from_file_name,
     make_page_id,
     make_span_id,
+    parse_chunk_id,
+    parse_claim_id,
     parse_page_id,
     parse_span_id,
     validate_document_id,
@@ -52,8 +54,22 @@ def test_parse_page_id_extracts_document_and_page() -> None:
     assert parse_page_id(f"{DOCUMENT_ID}:p0001") == (DOCUMENT_ID, 1)
 
 
+def test_parse_page_id_round_trips_generated_ids_with_large_page_numbers() -> None:
+    page_id = make_page_id(DOCUMENT_ID, 10000)
+
+    assert page_id == f"{DOCUMENT_ID}:p10000"
+    assert parse_page_id(page_id) == (DOCUMENT_ID, 10000)
+
+
 def test_parse_span_id_extracts_document_page_and_span_index() -> None:
     assert parse_span_id(f"{DOCUMENT_ID}:p0001:s0002") == (DOCUMENT_ID, 1, 2)
+
+
+def test_parse_span_id_round_trips_generated_ids_with_large_page_and_span_numbers() -> None:
+    span_id = make_span_id(DOCUMENT_ID, 10000, 10000)
+
+    assert span_id == f"{DOCUMENT_ID}:p10000:s10000"
+    assert parse_span_id(span_id) == (DOCUMENT_ID, 10000, 10000)
 
 
 @pytest.mark.parametrize(
@@ -61,6 +77,8 @@ def test_parse_span_id_extracts_document_page_and_span_index() -> None:
     [
         "not-a-page-id",
         f"{DOCUMENT_ID}:page0001",
+        f"{DOCUMENT_ID}:p001",
+        f"{DOCUMENT_ID}:p00001",
         f"{DOCUMENT_ID}:p0000",
     ],
 )
@@ -74,6 +92,10 @@ def test_parse_page_id_rejects_malformed_values(page_id: str) -> None:
     [
         "not-a-span-id",
         f"{DOCUMENT_ID}:p0001:span0000",
+        f"{DOCUMENT_ID}:p001:s0000",
+        f"{DOCUMENT_ID}:p00001:s0000",
+        f"{DOCUMENT_ID}:p0001:s001",
+        f"{DOCUMENT_ID}:p0001:s00000",
         f"{DOCUMENT_ID}:p0000:s0000",
     ],
 )
@@ -89,11 +111,31 @@ def test_make_chunk_id_is_deterministic() -> None:
     assert make_chunk_id(DOCUMENT_ID, 0) == expected
 
 
+def test_parse_chunk_id_round_trips_generated_ids_with_large_chunk_indexes() -> None:
+    chunk_id = make_chunk_id(DOCUMENT_ID, 10000)
+
+    assert chunk_id == f"{DOCUMENT_ID}:c10000"
+    assert parse_chunk_id(chunk_id) == (DOCUMENT_ID, 10000)
+
+
+@pytest.mark.parametrize("chunk_id", [f"{DOCUMENT_ID}:c1", f"{DOCUMENT_ID}:c00001"])
+def test_parse_chunk_id_rejects_non_canonical_ids(chunk_id: str) -> None:
+    with pytest.raises(ValueError):
+        parse_chunk_id(chunk_id)
+
+
 def test_make_claim_id_is_deterministic() -> None:
     expected = f"{DOCUMENT_ID}:claim0000"
 
     assert make_claim_id(DOCUMENT_ID, 0) == expected
     assert make_claim_id(DOCUMENT_ID, 0) == expected
+
+
+def test_parse_claim_id_round_trips_generated_ids_with_large_claim_indexes() -> None:
+    claim_id = make_claim_id(DOCUMENT_ID, 10000)
+
+    assert claim_id == f"{DOCUMENT_ID}:claim10000"
+    assert parse_claim_id(claim_id) == (DOCUMENT_ID, 10000)
 
 
 @pytest.mark.parametrize("page_number", [0, -1])

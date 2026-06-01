@@ -10,8 +10,8 @@ def _chunk() -> Chunk:
         chunk_id=make_chunk_id(DOCUMENT_ID, 0),
         document_id=DOCUMENT_ID,
         text="Revenue increased by 10%.",
-        page_numbers=[1],
-        source_span_ids=[make_span_id(DOCUMENT_ID, 1, 0)],
+        page_numbers=(1,),
+        source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),),
     )
 
 

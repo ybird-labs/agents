@@ -48,7 +48,7 @@ def _claim(
     claim_role: str = "finding",
     evidence: tuple[ClaimEvidence, ...] | None = None,
     derived_from_claim_ids: tuple[str, ...] = (),
-    validation_status: str = "unvalidated",
+    validation_status: str = "valid",
     validation_errors: tuple[str, ...] = (),
 ) -> SummaryClaim:
     return SummaryClaim(
@@ -105,6 +105,17 @@ def test_document_summary_serializes_and_round_trips_with_tuple_provenance() -> 
     assert isinstance(restored.claims[0].evidence, tuple)
     assert isinstance(restored.claims[0].evidence[0].source_span_ids, tuple)
     assert restored.claims[0].evidence[0].source_chunk_ids == (make_chunk_id(DOCUMENT_ID, 0),)
+
+
+def test_summary_models_accept_large_generated_provenance_ids() -> None:
+    evidence = _evidence(span_index=10000, chunk_index=10000)
+    claim = _claim(claim_index=10000, evidence=(evidence,))
+    summary = _document_summary(claims=(claim,))
+
+    assert evidence.source_span_ids == (make_span_id(DOCUMENT_ID, 1, 10000),)
+    assert evidence.source_chunk_ids == (make_chunk_id(DOCUMENT_ID, 10000),)
+    assert claim.claim_id == make_claim_id(DOCUMENT_ID, 10000)
+    assert summary.claims == (claim,)
 
 
 def test_summary_models_reject_invalid_document_id() -> None:
@@ -232,14 +243,44 @@ def test_summary_claim_rejects_self_derived_claim_id() -> None:
             lambda: ClaimEvidence(
                 quote="Revenue increased.",
                 page_number=1,
+                source_span_ids=(f"{DOCUMENT_ID}:p0001:s00000",),
+                source_chunk_ids=(make_chunk_id(DOCUMENT_ID, 0),),
+            ),
+            "span_id must use '<document_id>:p0001:s0000' format",
+        ),
+        (
+            lambda: ClaimEvidence(
+                quote="Revenue increased.",
+                page_number=1,
                 source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),),
                 source_chunk_ids=("bad-chunk-id",),
             ),
             "chunk_id must use '<document_id>:c0000' format",
         ),
         (
+            lambda: ClaimEvidence(
+                quote="Revenue increased.",
+                page_number=1,
+                source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),),
+                source_chunk_ids=(f"{DOCUMENT_ID}:c00001",),
+            ),
+            "chunk_id must use '<document_id>:c0000' format",
+        ),
+        (
             lambda: SummaryClaim(
                 claim_id="bad-claim-id",
+                document_id=DOCUMENT_ID,
+                document_type="generic",
+                claim="Something happened.",
+                claim_role="finding",
+                importance="medium",
+                evidence=(_evidence(),),
+            ),
+            "claim_id must use '<document_id>:claim0000' format",
+        ),
+        (
+            lambda: SummaryClaim(
+                claim_id=f"{DOCUMENT_ID}:claim00001",
                 document_id=DOCUMENT_ID,
                 document_type="generic",
                 claim="Something happened.",
@@ -345,7 +386,28 @@ def test_document_type_specific_roles_are_allowed(document_type: str, claim_role
 def test_chunk_summary_rejects_claim_that_does_not_cite_chunk() -> None:
     claim = _claim(evidence=(_evidence(chunk_index=1),))
 
-    with pytest.raises(ValidationError, match="claim evidence must cite chunk_id"):
+    with pytest.raises(ValidationError, match="claim evidence must cite only chunk_id"):
+        ChunkSummary(
+            chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+            document_id=DOCUMENT_ID,
+            document_type="business_review",
+            claims=(claim,),
+        )
+
+
+def test_chunk_summary_rejects_claim_that_cites_unrelated_chunk_too() -> None:
+    claim = _claim(
+        evidence=(
+            _evidence(
+                source_chunk_ids=(
+                    make_chunk_id(DOCUMENT_ID, 0),
+                    make_chunk_id(DOCUMENT_ID, 1),
+                )
+            ),
+        )
+    )
+
+    with pytest.raises(ValidationError, match="claim evidence must cite only chunk_id"):
         ChunkSummary(
             chunk_id=make_chunk_id(DOCUMENT_ID, 0),
             document_id=DOCUMENT_ID,

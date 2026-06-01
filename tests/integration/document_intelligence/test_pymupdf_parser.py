@@ -117,14 +117,17 @@ def test_pymupdf_parser_creates_document_ir_from_generated_pdf(tmp_path: Path) -
         "Executive summary",
         "Revenue increased by 10%",
     ]
+    assert [
+        (span.char_start, span.char_end) for span in first_page_spans
+    ] == [(0, 17), (18, 42)]
+    assert document.pages[1].spans[0].char_start == 43
+    assert document.pages[1].spans[0].char_end == 62
     assert all(span.parser_run_id == PYMUPDF_TEXT_PARSER_RUN_ID for span in first_page_spans)
     assert first_page_spans[0].bbox is not None
     assert first_page_spans[0].bbox.x1 >= first_page_spans[0].bbox.x0
     assert first_page_spans[0].bbox.y1 >= first_page_spans[0].bbox.y0
 
-    assert "Executive summary" in document.content
-    assert "Revenue increased by 10%" in document.content
-    assert "Second page finding" in document.content
+    assert document.content == "Executive summary\nRevenue increased by 10%\nSecond page finding"
     for page in document.pages:
         for span in page.spans:
             assert document.content[span.char_start : span.char_end] == span.text

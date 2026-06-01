@@ -898,4 +898,4 @@ def test_chunk_document_output_is_unchanged_and_ignores_layout() -> None:
     assert len(chunks) == 1
     assert chunks[0].chunk_id == make_chunk_id(DOCUMENT_ID, 0)
     assert chunks[0].text == "Alpha paragraph\nBeta paragraph"
-    assert chunks[0].source_span_ids == [_span_id(1, 0), _span_id(1, 1)]
+    assert chunks[0].source_span_ids == (_span_id(1, 0), _span_id(1, 1))

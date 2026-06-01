@@ -92,6 +92,42 @@ def test_document_ir_serializes_to_json_ready_dict() -> None:
     assert data["pages"][0]["spans"][1]["bbox"]["coordinate_system"] == "pdf_points_top_left"
 
 
+@pytest.mark.parametrize(
+    ("model_factory", "kwargs"),
+    [
+        (
+            DocumentSource,
+            {"file_name": f"{DOCUMENT_ID}.pdf", "file_extension": "pdf"},
+        ),
+        (ParserRun, {"parser_run_id": PARSER_RUN_ID, "parser_name": "test-parser"}),
+        (
+            TextSpan,
+            {
+                "span_id": make_span_id(DOCUMENT_ID, 1, 0),
+                "page_number": 1,
+                "text": "Alpha",
+                "char_start": 0,
+                "char_end": 5,
+                "reading_order": 0,
+            },
+        ),
+        (Page, {"page_id": make_page_id(DOCUMENT_ID, 1), "page_number": 1}),
+        (
+            DocumentIR,
+            {
+                "document_id": DOCUMENT_ID,
+                "source": DocumentSource(file_name=f"{DOCUMENT_ID}.pdf", file_extension="pdf"),
+                "content": "",
+                "pages": [],
+            },
+        ),
+    ],
+)
+def test_core_ir_models_reject_unknown_fields(model_factory, kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        model_factory(**kwargs, unexpected_field="value")
+
+
 def test_document_id_is_canonicalized() -> None:
     document = _make_document_ir().model_copy(
         update={"document_id": "550E8400-E29B-41D4-A716-446655440000"}

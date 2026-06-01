@@ -7,6 +7,7 @@ from exeboard_ai.document_intelligence.parsing.ports import (
     EncryptedDocumentError,
     LayoutExtractionError,
     NoExtractableTextError,
+    ParserDependencyError,
     SpanAlignmentError,
     UnreadableDocumentError,
 )
@@ -36,6 +37,7 @@ def test_document_parser_protocol_accepts_structural_parser() -> None:
 
 
 def test_parser_specific_errors_are_parser_port_errors() -> None:
+    assert issubclass(ParserDependencyError, DocumentParseError)
     assert issubclass(EncryptedDocumentError, DocumentParseError)
     assert issubclass(UnreadableDocumentError, DocumentParseError)
     assert issubclass(NoExtractableTextError, DocumentParseError)

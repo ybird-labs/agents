@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -10,6 +9,9 @@ from exeboard_ai.document_intelligence.core.ids import (
     ClaimId,
     DocumentId,
     SpanId,
+    parse_chunk_id as parse_core_chunk_id,
+    parse_claim_id as parse_core_claim_id,
+    parse_span_id as parse_core_span_id,
     validate_document_id,
 )
 
@@ -50,12 +52,6 @@ DEFAULT_ALLOWED_CLAIM_ROLES_BY_DOCUMENT_TYPE: dict[DocumentType, frozenset[Claim
         ["finding", "decision", "action_item", "risk", "open_question"]
     ),
 }
-
-_ID_DOCUMENT_PATTERN = r"(?P<document_id>[0-9a-fA-F-]{36})"
-_CLAIM_ID_PATTERN = re.compile(rf"^{_ID_DOCUMENT_PATTERN}:claim[0-9]{{4}}$")
-_CHUNK_ID_PATTERN = re.compile(rf"^{_ID_DOCUMENT_PATTERN}:c[0-9]{{4}}$")
-_SPAN_ID_PATTERN = re.compile(rf"^{_ID_DOCUMENT_PATTERN}:p(?P<page_number>[0-9]{{4}}):s[0-9]{{4}}$")
-
 
 class ClaimEvidence(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -194,8 +190,8 @@ class ChunkSummary(BaseModel):
                 raise ValueError("claim document_id must match ChunkSummary document_id")
             if claim.document_type != self.document_type:
                 raise ValueError("claim document_type must match ChunkSummary document_type")
-            if not any(self.chunk_id in evidence.source_chunk_ids for evidence in claim.evidence):
-                raise ValueError("claim evidence must cite chunk_id")
+            if any(evidence.source_chunk_ids != (self.chunk_id,) for evidence in claim.evidence):
+                raise ValueError("claim evidence must cite only chunk_id")
 
         return self
 
@@ -258,6 +254,8 @@ class DocumentSummary(BaseModel):
                 raise ValueError("claim document_id must match DocumentSummary document_id")
             if claim.document_type != self.document_type:
                 raise ValueError("claim document_type must match DocumentSummary document_type")
+            if claim.validation_status != "valid":
+                raise ValueError("claims must be valid before final summary")
 
         for sentence in self.summary_sentences:
             for claim_id in sentence.supporting_claim_ids:
@@ -270,29 +268,27 @@ class DocumentSummary(BaseModel):
 
 
 def _parse_claim_id(claim_id: ClaimId) -> DocumentId:
-    match = _CLAIM_ID_PATTERN.fullmatch(claim_id)
-    if match is None:
-        raise ValueError("claim_id must use '<document_id>:claim0000' format")
-    return validate_document_id(match.group("document_id"))
+    try:
+        document_id, _claim_index = parse_core_claim_id(claim_id)
+    except ValueError as exc:
+        raise ValueError("claim_id must use '<document_id>:claim0000' format") from exc
+    return document_id
 
 
 def _parse_chunk_id(chunk_id: ChunkId) -> DocumentId:
-    match = _CHUNK_ID_PATTERN.fullmatch(chunk_id)
-    if match is None:
-        raise ValueError("chunk_id must use '<document_id>:c0000' format")
-    return validate_document_id(match.group("document_id"))
+    try:
+        document_id, _chunk_index = parse_core_chunk_id(chunk_id)
+    except ValueError as exc:
+        raise ValueError("chunk_id must use '<document_id>:c0000' format") from exc
+    return document_id
 
 
 def _parse_span_id(span_id: SpanId) -> tuple[DocumentId, int]:
-    match = _SPAN_ID_PATTERN.fullmatch(span_id)
-    if match is None:
-        raise ValueError("span_id must use '<document_id>:p0001:s0000' format")
-
-    page_number = int(match.group("page_number"))
-    if page_number < 1:
-        raise ValueError("span_id page number must be 1 or greater")
-
-    return validate_document_id(match.group("document_id")), page_number
+    try:
+        document_id, page_number, _span_index = parse_core_span_id(span_id)
+    except ValueError as exc:
+        raise ValueError("span_id must use '<document_id>:p0001:s0000' format") from exc
+    return document_id, page_number
 
 
 def _document_id_from_evidence(evidence: ClaimEvidence) -> DocumentId:
