@@ -79,11 +79,79 @@ def test_exact_quote_in_cited_span_is_valid() -> None:
     assert result.matches[0].scope == "cited_spans"
 
 
+def test_exact_quote_match_preserves_source_whitespace() -> None:
+    quote = " Revenue increased by 10%. "
+    result = validate_claim_quotes(
+        claim=_claim(quote=quote),
+        span_index=_span_index(first_text=quote),
+    )
+
+    assert result.valid is True
+    assert result.matches[0].quote == quote
+
+
 def test_exact_quote_on_cited_page_is_invalid_when_outside_cited_span() -> None:
     result = validate_claim_quotes(
         claim=_claim(quote="Costs declined.", span_index=0),
         span_index=_span_index(),
     )
+
+    assert result.valid is False
+    assert result.errors[0].code == "quote_outside_cited_spans"
+    assert result.matches[0].match_type == "exact"
+    assert result.matches[0].scope == "page"
+
+
+def test_quote_validator_is_invalid_when_any_cited_span_is_missing() -> None:
+    claim = SummaryClaim(
+        claim_id=make_claim_id(DOCUMENT_ID, 0),
+        document_id=DOCUMENT_ID,
+        document_type="business_review",
+        claim="Revenue increased by 10%.",
+        claim_role="finding",
+        importance="high",
+        evidence=(
+            ClaimEvidence(
+                quote="Revenue increased by 10%.",
+                page_number=1,
+                source_span_ids=(
+                    make_span_id(DOCUMENT_ID, 1, 0),
+                    make_span_id(DOCUMENT_ID, 1, 99),
+                ),
+                source_chunk_ids=(make_chunk_id(DOCUMENT_ID, 0),),
+            ),
+        ),
+    )
+
+    result = validate_claim_quotes(claim=claim, span_index=_span_index())
+
+    assert result.valid is False
+    assert result.errors[0].code == "invalid_span_id"
+    assert result.errors[0].source_span_id == make_span_id(DOCUMENT_ID, 1, 99)
+
+
+def test_quote_crossing_cited_span_boundary_is_invalid() -> None:
+    claim = SummaryClaim(
+        claim_id=make_claim_id(DOCUMENT_ID, 0),
+        document_id=DOCUMENT_ID,
+        document_type="business_review",
+        claim="Revenue increased and costs declined.",
+        claim_role="finding",
+        importance="high",
+        evidence=(
+            ClaimEvidence(
+                quote="increased by 10%.\nCosts",
+                page_number=1,
+                source_span_ids=(
+                    make_span_id(DOCUMENT_ID, 1, 0),
+                    make_span_id(DOCUMENT_ID, 1, 1),
+                ),
+                source_chunk_ids=(make_chunk_id(DOCUMENT_ID, 0),),
+            ),
+        ),
+    )
+
+    result = validate_claim_quotes(claim=claim, span_index=_span_index())
 
     assert result.valid is False
     assert result.errors[0].code == "quote_outside_cited_spans"
@@ -97,6 +165,14 @@ def test_missing_quote_is_invalid() -> None:
     assert result.valid is False
     assert result.errors[0].code == "quote_not_found"
     assert result.errors[0].evidence_index == 0
+
+
+def test_missing_quote_error_preserves_source_whitespace() -> None:
+    quote = " Invented quote. "
+    result = validate_claim_quotes(claim=_claim(quote=quote), span_index=_span_index())
+
+    assert result.valid is False
+    assert result.errors[0].quote == quote
 
 
 def test_normalized_whitespace_match_is_classified_but_not_valid() -> None:
@@ -129,6 +205,31 @@ def test_quote_validator_does_not_mutate_claim_validation_status() -> None:
     assert result.valid is True
     assert claim.validation_status == "unvalidated"
     assert claim.validation_errors == ()
+
+
+def test_quote_validation_error_rejects_whitespace_only_source_span_id() -> None:
+    with pytest.raises(ValidationError, match="source_span_id must not be empty"):
+        QuoteValidationError(
+            code="invalid_span_id",
+            message="Missing span.",
+            claim_id=make_claim_id(DOCUMENT_ID, 0),
+            evidence_index=0,
+            quote="Revenue increased by 10%.",
+            source_span_id=" \t\n ",
+        )
+
+
+def test_quote_validation_error_allows_missing_source_span_id() -> None:
+    error = QuoteValidationError(
+        code="quote_not_found",
+        message="Missing quote.",
+        claim_id=make_claim_id(DOCUMENT_ID, 0),
+        evidence_index=0,
+        quote="Missing quote.",
+        source_span_id=None,
+    )
+
+    assert error.source_span_id is None
 
 
 def test_quote_validation_result_valid_must_match_errors() -> None:

@@ -32,6 +32,7 @@ def summarize_document(
             chunk=chunk,
             document_type=document_type,
             generator=response_generator,
+            span_index=span_index,
             first_claim_index=next_claim_index,
         )
         next_claim_index += len(chunk_summary.claims)
