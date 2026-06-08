@@ -9,7 +9,6 @@ class StructuredGenerationRequest(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,
         extra="forbid",
-        str_strip_whitespace=True,
     )
 
     operation_name: str
@@ -18,6 +17,7 @@ class StructuredGenerationRequest(BaseModel):
     output_schema_name: str
     output_schema_version: str
     prompt: str
+    context: BaseModel | None = None
     replay_key: str | None = None
     metadata: dict[str, str] = Field(default_factory=dict)
 
@@ -31,14 +31,14 @@ class StructuredGenerationRequest(BaseModel):
     )
     @classmethod
     def _must_not_be_empty(cls, value: str) -> str:
-        if not value:
+        if not value or not value.strip():
             raise ValueError("must not be empty")
         return value
 
     @field_validator("replay_key")
     @classmethod
     def _replay_key_must_not_be_empty(cls, value: str | None) -> str | None:
-        if value is not None and not value:
+        if value is not None and (not value or not value.strip()):
             raise ValueError("replay_key must not be empty")
         return value
 
@@ -48,9 +48,9 @@ class StructuredGenerationRequest(BaseModel):
         cls,
         value: dict[str, str],
     ) -> dict[str, str]:
-        if any(not key for key in value):
+        if any(not key or not key.strip() for key in value):
             raise ValueError("metadata keys must not be empty")
-        if any(not metadata_value for metadata_value in value.values()):
+        if any(not metadata_value or not metadata_value.strip() for metadata_value in value.values()):
             raise ValueError("metadata values must not be empty")
         return value
 

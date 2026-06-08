@@ -57,7 +57,6 @@ class ClaimEvidence(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,
         extra="forbid",
-        str_strip_whitespace=True,
     )
 
     quote: str
@@ -68,7 +67,7 @@ class ClaimEvidence(BaseModel):
     @field_validator("quote")
     @classmethod
     def _quote_must_not_be_empty(cls, value: str) -> str:
-        if not value:
+        if not value or not value.strip():
             raise ValueError("quote must not be empty")
         return value
 

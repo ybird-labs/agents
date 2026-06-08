@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import TypeVar
 
+import pytest
 from pydantic import BaseModel
 
 from exeboard_ai.document_intelligence.core.ids import make_page_id, make_span_id
@@ -8,6 +9,7 @@ from exeboard_ai.document_intelligence.ir.models import DocumentIR, DocumentSour
 from exeboard_ai.document_intelligence.parsing.ports import DocumentParser
 from exeboard_ai.document_intelligence.summarization.pipeline import summarize_document
 from exeboard_ai.document_intelligence.summarization.ports import StructuredGenerationRequest
+from exeboard_ai.document_intelligence.summarization.span_context import SpanAddressedChunkContext
 
 DOCUMENT_ID = "550e8400-e29b-41d4-a716-446655440000"
 T = TypeVar("T", bound=BaseModel)
@@ -50,49 +52,54 @@ class FakeParser(DocumentParser):
 
 
 class FakeStructuredResponseGenerator:
-    def __init__(self, *, cite_wrong_span_for_costs: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        cite_wrong_span_for_costs: bool = False,
+        costs_quote: str = "Costs declined.",
+    ) -> None:
         self.requests: list[StructuredGenerationRequest] = []
         self.cite_wrong_span_for_costs = cite_wrong_span_for_costs
+        self.costs_quote = costs_quote
 
     def generate(self, *, request: StructuredGenerationRequest, output_model: type[T]) -> T:
         self.requests.append(request)
-        revenue_claim = {
-            "claim": "Revenue increased.",
-            "claim_role": "finding",
-            "importance": "high",
-            "evidence": [
+        assert isinstance(request.context, SpanAddressedChunkContext)
+        allowed_span_ids = request.context.allowed_span_ids
+        claims: list[dict[str, object]] = []
+        revenue_span_id = make_span_id(DOCUMENT_ID, 1, 0)
+        costs_span_id = make_span_id(DOCUMENT_ID, 1, 1)
+        if revenue_span_id in allowed_span_ids:
+            claims.append(
                 {
-                    "quote": "Revenue increased.",
-                    "page_number": 1,
-                    "source_span_ids": (make_span_id(DOCUMENT_ID, 1, 0),),
+                    "claim": "Revenue increased.",
+                    "claim_role": "finding",
+                    "importance": "high",
+                    "evidence": [
+                        {
+                            "quote": "Revenue increased.",
+                            "source_span_ids": (revenue_span_id,),
+                        }
+                    ],
                 }
-            ],
-        }
-        costs_claim = {
-            "claim": "Costs declined.",
-            "claim_role": "finding",
-            "importance": "medium",
-            "evidence": [
+            )
+        if costs_span_id in allowed_span_ids:
+            claims.append(
                 {
-                    "quote": "Costs declined.",
-                    "page_number": 1,
-                    "source_span_ids": (
-                        make_span_id(
-                            DOCUMENT_ID,
-                            1,
-                            0 if self.cite_wrong_span_for_costs else 1,
-                        ),
-                    ),
+                    "claim": "Costs declined.",
+                    "claim_role": "finding",
+                    "importance": "medium",
+                    "evidence": [
+                        {
+                            "quote": self.costs_quote,
+                            "source_span_ids": (
+                                revenue_span_id if self.cite_wrong_span_for_costs else costs_span_id,
+                            ),
+                        }
+                    ],
                 }
-            ],
-        }
-        if "Revenue increased." in request.prompt and "Costs declined." in request.prompt:
-            payload = {"claims": [revenue_claim, costs_claim]}
-        elif "Revenue increased." in request.prompt:
-            payload = {"claims": [revenue_claim]}
-        else:
-            payload = {"claims": [costs_claim]}
-        return output_model.model_validate(payload)
+            )
+        return output_model.model_validate({"claims": claims})
 
 
 def test_summarize_document_pipeline_validates_and_preserves_unique_claim_ids() -> None:
@@ -112,11 +119,17 @@ def test_summarize_document_pipeline_validates_and_preserves_unique_claim_ids() 
         f"{DOCUMENT_ID}:claim0000",
         f"{DOCUMENT_ID}:claim0001",
     ]
+    assert [claim.evidence[0].page_number for claim in summary.claims] == [1, 1]
+    assert [claim.evidence[0].source_chunk_ids for claim in summary.claims] == [
+        (f"{DOCUMENT_ID}:c0000",),
+        (f"{DOCUMENT_ID}:c0001",),
+    ]
     assert [sentence.supporting_claim_ids for sentence in summary.summary_sentences] == [
         (f"{DOCUMENT_ID}:claim0000",),
         (f"{DOCUMENT_ID}:claim0001",),
     ]
     assert len(generator.requests) == 2
+    assert all(isinstance(request.context, SpanAddressedChunkContext) for request in generator.requests)
 
 
 def test_summarize_document_pipeline_excludes_same_page_wrong_span_quote() -> None:
@@ -135,3 +148,22 @@ def test_summarize_document_pipeline_excludes_same_page_wrong_span_quote() -> No
     assert [claim.claim_id for claim in summary.claims] == [f"{DOCUMENT_ID}:claim0000"]
     assert [sentence.text for sentence in summary.summary_sentences] == ["Revenue increased."]
     assert len(generator.requests) == 1
+
+
+@pytest.mark.parametrize("costs_quote", ["Costs   declined.", "Costs decline."])
+def test_summarize_document_pipeline_excludes_normalized_or_fuzzy_only_quote(
+    costs_quote: str,
+) -> None:
+    generator = FakeStructuredResponseGenerator(costs_quote=costs_quote)
+
+    summary = summarize_document(
+        Path("ignored.pdf"),
+        parser=FakeParser(),
+        response_generator=generator,
+        document_type="business_review",
+        target_chars=200,
+        max_chars=250,
+    )
+
+    assert [claim.claim for claim in summary.claims] == ["Revenue increased."]
+    assert [sentence.text for sentence in summary.summary_sentences] == ["Revenue increased."]

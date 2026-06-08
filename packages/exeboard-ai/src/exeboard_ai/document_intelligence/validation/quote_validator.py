@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from exeboard_ai.document_intelligence.core.ids import (
     ClaimId,
     DocumentId,
+    SpanId,
     validate_document_id,
     parse_claim_id,
 )
@@ -21,6 +22,7 @@ QuoteValidationErrorCode = Literal[
     "quote_outside_cited_spans",
     "normalized_match_only",
     "fuzzy_match",
+    "invalid_span_id",
     "document_mismatch",
 ]
 QuoteMatchType = Literal["exact", "normalized", "fuzzy"]
@@ -31,7 +33,6 @@ class QuoteValidationMatch(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,
         extra="forbid",
-        str_strip_whitespace=True,
     )
 
     claim_id: ClaimId
@@ -50,7 +51,7 @@ class QuoteValidationMatch(BaseModel):
     @field_validator("quote")
     @classmethod
     def _quote_must_not_be_empty(cls, value: str) -> str:
-        if not value:
+        if not value or not value.strip():
             raise ValueError("quote must not be empty")
         return value
 
@@ -59,7 +60,6 @@ class QuoteValidationError(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,
         extra="forbid",
-        str_strip_whitespace=True,
     )
 
     code: QuoteValidationErrorCode
@@ -69,6 +69,7 @@ class QuoteValidationError(BaseModel):
     quote: str | None = None
     expected_document_id: DocumentId | None = None
     actual_document_id: DocumentId | None = None
+    source_span_id: SpanId | None = None
 
     @field_validator("message")
     @classmethod
@@ -86,8 +87,15 @@ class QuoteValidationError(BaseModel):
     @field_validator("quote")
     @classmethod
     def _quote_must_not_be_empty(cls, value: str | None) -> str | None:
-        if value is not None and not value:
+        if value is not None and (not value or not value.strip()):
             raise ValueError("quote must not be empty")
+        return value
+
+    @field_validator("source_span_id")
+    @classmethod
+    def _source_span_id_must_not_be_empty(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("source_span_id must not be empty")
         return value
 
     @field_validator("expected_document_id", "actual_document_id")
@@ -157,13 +165,30 @@ def validate_claim_quotes(*, claim: SummaryClaim, span_index: SpanIndex) -> Quot
         )
 
     for evidence_index, evidence in enumerate(claim.evidence):
+        missing_span_ids = tuple(
+            span_id for span_id in evidence.source_span_ids if not span_index.has_span(span_id)
+        )
+        for missing_span_id in missing_span_ids:
+            errors.append(
+                QuoteValidationError(
+                    code="invalid_span_id",
+                    message="quote citation source_span_id does not exist in SpanIndex",
+                    claim_id=claim.claim_id,
+                    evidence_index=evidence_index,
+                    quote=evidence.quote,
+                    source_span_id=missing_span_id,
+                )
+            )
+
         evidence_match = _classify_evidence_quote(
             claim_id=claim.claim_id,
             evidence_index=evidence_index,
             quote=evidence.quote,
             page_number=evidence.page_number,
-            cited_span_text=span_index.get_text_for_spans(
-                span_id for span_id in evidence.source_span_ids if span_index.has_span(span_id)
+            cited_span_texts=tuple(
+                span_index.get_span(span_id).text
+                for span_id in evidence.source_span_ids
+                if span_index.has_span(span_id)
             ),
             page_text=span_index.get_page_text(evidence.page_number),
         )
@@ -217,10 +242,10 @@ def _classify_evidence_quote(
     evidence_index: int,
     quote: str,
     page_number: int,
-    cited_span_text: str,
+    cited_span_texts: tuple[str, ...],
     page_text: str,
 ) -> QuoteValidationMatch | QuoteValidationError:
-    if quote in cited_span_text:
+    if any(quote in cited_span_text for cited_span_text in cited_span_texts):
         return QuoteValidationMatch(
             claim_id=claim_id,
             evidence_index=evidence_index,
@@ -240,9 +265,9 @@ def _classify_evidence_quote(
         )
 
     normalized_quote = normalize_quote_text(quote)
-    normalized_span_text = normalize_quote_text(cited_span_text)
+    normalized_span_texts = tuple(normalize_quote_text(cited_span_text) for cited_span_text in cited_span_texts)
     normalized_page_text = normalize_quote_text(page_text)
-    if normalized_quote and normalized_quote in normalized_span_text:
+    if normalized_quote and any(normalized_quote in span_text for span_text in normalized_span_texts):
         return QuoteValidationMatch(
             claim_id=claim_id,
             evidence_index=evidence_index,
@@ -261,7 +286,7 @@ def _classify_evidence_quote(
             scope="page",
         )
 
-    if _has_fuzzy_match(normalized_quote, normalized_span_text):
+    if any(_has_fuzzy_match(normalized_quote, span_text) for span_text in normalized_span_texts):
         return QuoteValidationMatch(
             claim_id=claim_id,
             evidence_index=evidence_index,
