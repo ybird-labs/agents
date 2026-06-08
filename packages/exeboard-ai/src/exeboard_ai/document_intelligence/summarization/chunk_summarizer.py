@@ -254,7 +254,7 @@ def _assemble_evidence(
 
     page_numbers = {span.page_number for span in cited_spans}
     if len(page_numbers) != 1:
-        raise ValueError("evidence source_span_ids must cite spans on one page")
+        return None
     page_number = page_numbers.pop()
 
     return ClaimEvidence(

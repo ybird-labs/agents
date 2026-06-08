@@ -22,7 +22,7 @@ class AllowedEvidenceSpan(BaseModel):
     @field_validator("span_id", "text")
     @classmethod
     def _must_not_be_empty(cls, value: str) -> str:
-        if not value:
+        if not value or not value.strip():
             raise ValueError("must not be empty")
         return value
 
@@ -46,7 +46,7 @@ class SpanAddressedChunkContext(BaseModel):
     @field_validator("chunk_id", "chunk_text")
     @classmethod
     def _must_not_be_empty(cls, value: str) -> str:
-        if not value:
+        if not value or not value.strip():
             raise ValueError("must not be empty")
         return value
 

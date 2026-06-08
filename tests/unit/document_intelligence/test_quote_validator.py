@@ -207,6 +207,31 @@ def test_quote_validator_does_not_mutate_claim_validation_status() -> None:
     assert claim.validation_errors == ()
 
 
+def test_quote_validation_error_rejects_whitespace_only_source_span_id() -> None:
+    with pytest.raises(ValidationError, match="source_span_id must not be empty"):
+        QuoteValidationError(
+            code="invalid_span_id",
+            message="Missing span.",
+            claim_id=make_claim_id(DOCUMENT_ID, 0),
+            evidence_index=0,
+            quote="Revenue increased by 10%.",
+            source_span_id=" \t\n ",
+        )
+
+
+def test_quote_validation_error_allows_missing_source_span_id() -> None:
+    error = QuoteValidationError(
+        code="quote_not_found",
+        message="Missing quote.",
+        claim_id=make_claim_id(DOCUMENT_ID, 0),
+        evidence_index=0,
+        quote="Missing quote.",
+        source_span_id=None,
+    )
+
+    assert error.source_span_id is None
+
+
 def test_quote_validation_result_valid_must_match_errors() -> None:
     error = QuoteValidationError(
         code="quote_not_found",

@@ -94,7 +94,7 @@ class QuoteValidationError(BaseModel):
     @field_validator("source_span_id")
     @classmethod
     def _source_span_id_must_not_be_empty(cls, value: str | None) -> str | None:
-        if value is not None and not value:
+        if value is not None and (not value or not value.strip()):
             raise ValueError("source_span_id must not be empty")
         return value
 
