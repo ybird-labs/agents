@@ -221,7 +221,7 @@ def run_summary_grounding_case(
             target_chars=case.target_chars,
             max_chars=case.max_chars,
         )
-    except ValueError as exc:
+    except Exception as exc:
         return SummaryGroundingResult(
             case_id=case.case_id,
             passed=False,

@@ -1,12 +1,18 @@
 from pathlib import Path
 from typing import TypeVar
 
-from pydantic import BaseModel
-
 from exeboard_ai.document_intelligence.core.ids import make_page_id, make_span_id
-from exeboard_ai.document_intelligence.ir.models import DocumentIR, DocumentSource, Page, TextSpan
+from exeboard_ai.document_intelligence.ir.models import (
+    DocumentIR,
+    DocumentSource,
+    Page,
+    TextSpan,
+)
 from exeboard_ai.document_intelligence.parsing.adapters.pymupdf import PyMuPDFParser
-from exeboard_ai.document_intelligence.parsing.ports import DocumentParser
+from exeboard_ai.document_intelligence.parsing.ports import (
+    DocumentParser,
+    UnreadableDocumentError,
+)
 from exeboard_evals.document_intelligence.summary_grounding import (
     ReplaySummaryGroundingGenerator,
     SummaryGroundingCase,
@@ -14,6 +20,7 @@ from exeboard_evals.document_intelligence.summary_grounding import (
     run_summary_grounding_case,
     write_summary_grounding_report,
 )
+from pydantic import BaseModel
 
 DOCUMENT_ID = "550e8400-e29b-41d4-a716-446655440000"
 T = TypeVar("T", bound=BaseModel)
@@ -53,6 +60,11 @@ class FakeParser(DocumentParser):
                 ),
             ],
         )
+
+
+class FailingParser(DocumentParser):
+    def parse(self, path: Path) -> DocumentIR:
+        raise UnreadableDocumentError("boom")
 
 
 def _case(*, costs_source_span_id: str | None = None) -> SummaryGroundingCase:
@@ -97,7 +109,9 @@ def _case(*, costs_source_span_id: str | None = None) -> SummaryGroundingCase:
     )
 
 
-def test_summary_grounding_eval_passes_when_only_expected_exact_span_claims_survive() -> None:
+def test_summary_grounding_eval_passes_when_only_expected_exact_span_claims_survive() -> (
+    None
+):
     case = _case()
 
     result = run_summary_grounding_case(
@@ -126,6 +140,21 @@ def test_summary_grounding_eval_fails_when_forbidden_claim_survives() -> None:
     assert "forbidden claim survived: Costs declined by 3%." in result.failures
 
 
+def test_summary_grounding_eval_converts_parser_exception_to_failing_result() -> None:
+    case = _case()
+
+    result = run_summary_grounding_case(
+        case,
+        parser=FailingParser(),
+        response_generator=ReplaySummaryGroundingGenerator(case.generated_claims),
+    )
+
+    assert result.passed is False
+    assert result.failures == ("pipeline failed: boom",)
+    assert result.observed_claims == ()
+    assert result.observed_summary_sentences == ()
+
+
 def test_load_summary_grounding_cases_reads_jsonl(tmp_path: Path) -> None:
     case = _case()
     dataset_path = tmp_path / "cases.jsonl"
@@ -148,30 +177,31 @@ def test_write_summary_grounding_report_emits_json_summary(tmp_path: Path) -> No
     write_summary_grounding_report((result,), report_path)
 
     assert report_path.read_text(encoding="utf-8") == (
-        '{\n'
+        "{\n"
         '  "total": 1,\n'
         '  "passed": 1,\n'
         '  "failed": 0,\n'
         '  "results": [\n'
-        '    {\n'
+        "    {\n"
         '      "case_id": "business-review-grounding",\n'
         '      "passed": true,\n'
         '      "failures": [],\n'
         '      "observed_claims": [\n'
         '        "Revenue increased by 10%."\n'
-        '      ],\n'
+        "      ],\n"
         '      "observed_summary_sentences": [\n'
         '        "Revenue increased by 10%."\n'
-        '      ]\n'
-        '    }\n'
-        '  ]\n'
-        '}\n'
+        "      ]\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
     )
 
 
 def test_committed_summary_grounding_dataset_passes_with_pymupdf_fixture() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
     cases = load_summary_grounding_cases(
-        Path("evals/datasets/document_intelligence/summary_grounding_v1.jsonl")
+        repo_root / "evals/datasets/document_intelligence/summary_grounding_v1.jsonl"
     )
 
     results = tuple(
@@ -183,4 +213,5 @@ def test_committed_summary_grounding_dataset_passes_with_pymupdf_fixture() -> No
         for case in cases
     )
 
-    assert [result.failures for result in results] == [()]
+    assert results, "Expected at least one summary grounding case in committed dataset."
+    assert all(result.failures == () for result in results)
