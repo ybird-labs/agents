@@ -73,6 +73,8 @@ class ExpectedClaimSpec(BaseModel):
             raise ValueError("page_number must be 1 or greater")
         if not self.source_span_ids:
             raise ValueError("source_span_ids must not be empty")
+        if any(not span_id or not span_id.strip() for span_id in self.source_span_ids):
+            raise ValueError("source_span_ids must not contain empty span ids")
         if len(set(self.source_span_ids)) != len(self.source_span_ids):
             raise ValueError("source_span_ids must be unique")
         return self
@@ -225,7 +227,7 @@ def run_summary_grounding_case(
         return SummaryGroundingResult(
             case_id=case.case_id,
             passed=False,
-            failures=(f"pipeline failed: {exc}",),
+            failures=(f"pipeline failed ({exc.__class__.__name__}): {exc}",),
             observed_claims=(),
             observed_summary_sentences=(),
         )

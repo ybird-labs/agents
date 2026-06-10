@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import TypeVar
 
+import pytest
+
 from exeboard_ai.document_intelligence.core.ids import make_page_id, make_span_id
 from exeboard_ai.document_intelligence.ir.models import (
     DocumentIR,
@@ -150,9 +152,19 @@ def test_summary_grounding_eval_converts_parser_exception_to_failing_result() ->
     )
 
     assert result.passed is False
-    assert result.failures == ("pipeline failed: boom",)
+    assert result.failures == ("pipeline failed (UnreadableDocumentError): boom",)
     assert result.observed_claims == ()
     assert result.observed_summary_sentences == ()
+
+
+def test_expected_claim_spec_rejects_blank_source_span_ids() -> None:
+    revenue_span_id = make_span_id(DOCUMENT_ID, 1, 0)
+
+    payload = _case().model_dump(mode="json")
+    payload["expected_claims"][0]["source_span_ids"] = [revenue_span_id, "  "]
+
+    with pytest.raises(ValueError, match="source_span_ids must not contain empty span ids"):
+        SummaryGroundingCase.model_validate(payload)
 
 
 def test_load_summary_grounding_cases_reads_jsonl(tmp_path: Path) -> None:
