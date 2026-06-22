@@ -10,6 +10,10 @@ from exeboard_ai.document_intelligence.summarization.models import (
     ClaimEvidence,
     ChunkSummary,
     DocumentSummary,
+    DroppedClaimRecord,
+    EvidenceFailureDetail,
+    GroundingRunReport,
+    SummarizationRunResult,
     SummaryClaim,
     SummarySentence,
 )
@@ -91,6 +95,181 @@ def _document_summary(
         summary_sentences=actual_summary_sentences,
         claims=actual_claims,
     )
+
+
+def test_grounding_run_report_enforces_claim_conservation() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="claims_assembled must equal claims_proposed minus assembly drops",
+    ):
+        GroundingRunReport(
+            claims_proposed=2,
+            evidence_proposed=2,
+            claims_assembled=2,
+            claims_valid=2,
+            drops=(
+                DroppedClaimRecord(
+                    stage="assembly_anchor",
+                    error_codes=("quote_not_found",),
+                    chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+                    proposal_index=1,
+                    generated_claim="Invented claim.",
+                ),
+            ),
+        )
+
+
+def test_grounding_run_report_counts_drop_stages_and_error_codes() -> None:
+    report = GroundingRunReport(
+        claims_proposed=3,
+        evidence_proposed=4,
+        claims_assembled=2,
+        claims_valid=1,
+        drops=(
+            DroppedClaimRecord(
+                stage="assembly_anchor",
+                error_codes=("quote_not_found",),
+                chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+                proposal_index=0,
+                generated_claim="Invented claim.",
+                evidence_failures=(
+                    EvidenceFailureDetail(
+                        evidence_index=1,
+                        error_code="quote_not_found",
+                        quote="Invented quote.",
+                        source_span_ids=(make_span_id(DOCUMENT_ID, 1, 0),),
+                    ),
+                ),
+            ),
+            DroppedClaimRecord(
+                stage="quote_validation",
+                error_codes=("quote_outside_cited_spans",),
+                claim_id=make_claim_id(DOCUMENT_ID, 1),
+                chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+                proposal_index=1,
+            ),
+        ),
+        parser_counters={"page_count": 1, "span_count": 2},
+    )
+
+    assert report.assembly_drop_count == 1
+    assert report.citation_validation_drop_count == 0
+    assert report.quote_validation_drop_count == 1
+    assert report.counts_by_error_code == {
+        "quote_not_found": 1,
+        "quote_outside_cited_spans": 1,
+    }
+    assert report.drop_rate == pytest.approx(2 / 3)
+    assert report.parser_counters == {"page_count": 1, "span_count": 2}
+
+
+def test_grounding_run_report_rejects_assembly_drop_without_reducing_assembled_claims() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="claims_assembled must equal claims_proposed minus assembly drops",
+    ):
+        GroundingRunReport(
+            claims_proposed=2,
+            evidence_proposed=2,
+            claims_assembled=2,
+            claims_valid=1,
+            drops=(
+                DroppedClaimRecord(
+                    stage="assembly_anchor",
+                    error_codes=("quote_not_found",),
+                    chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+                    proposal_index=0,
+                ),
+            ),
+        )
+
+
+def test_grounding_run_report_rejects_validation_drop_without_reducing_valid_claims() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="claims_valid must equal claims_assembled minus validation drops",
+    ):
+        GroundingRunReport(
+            claims_proposed=3,
+            evidence_proposed=3,
+            claims_assembled=3,
+            claims_valid=3,
+            drops=(
+                DroppedClaimRecord(
+                    stage="citation_validation",
+                    error_codes=("citation_span_missing",),
+                    chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+                    claim_id=make_claim_id(DOCUMENT_ID, 2),
+                ),
+            ),
+        )
+
+
+def test_grounding_run_report_rejects_supplied_stage_count_mismatch() -> None:
+    with pytest.raises(ValidationError, match="assembly_drop_count must match drops"):
+        GroundingRunReport(
+            claims_proposed=1,
+            evidence_proposed=1,
+            claims_assembled=0,
+            claims_valid=0,
+            drops=(
+                DroppedClaimRecord(
+                    stage="assembly_anchor",
+                    error_codes=("quote_not_found",),
+                    chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+                    proposal_index=0,
+                ),
+            ),
+            assembly_drop_count=2,
+        )
+
+
+def test_summarization_run_result_allows_explicit_zero_valid_summary() -> None:
+    report = GroundingRunReport(
+        claims_proposed=1,
+        evidence_proposed=1,
+        claims_assembled=0,
+        claims_valid=0,
+        drops=(
+            DroppedClaimRecord(
+                stage="assembly_anchor",
+                error_codes=("quote_not_found",),
+                chunk_id=make_chunk_id(DOCUMENT_ID, 0),
+                proposal_index=0,
+            ),
+        ),
+    )
+
+    result = SummarizationRunResult(summary=None, report=report, status="zero_valid_claims")
+
+    assert result.summary is None
+    assert result.status == "zero_valid_claims"
+
+
+@pytest.mark.parametrize(
+    ("summary", "status", "claims_valid", "message"),
+    [
+        (None, "completed", 0, "summary=None requires zero_valid_claims status"),
+        (_document_summary(), "zero_valid_claims", 1, "zero_valid_claims status requires summary=None"),
+    ],
+)
+def test_summarization_run_result_rejects_inconsistent_status(
+    summary: DocumentSummary | None,
+    status: str,
+    claims_valid: int,
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        SummarizationRunResult(
+            summary=summary,
+            status=status,  # type: ignore[arg-type]
+            report=GroundingRunReport(
+                claims_proposed=claims_valid,
+                evidence_proposed=claims_valid,
+                claims_assembled=claims_valid,
+                claims_valid=claims_valid,
+            ),
+        )
 
 
 def test_document_summary_serializes_and_round_trips_with_tuple_provenance() -> None:

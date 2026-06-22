@@ -5,6 +5,22 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 T = TypeVar("T", bound=BaseModel)
 
 
+class StructuredGenerationError(Exception):
+    """Provider-agnostic base error for structured generation failures."""
+
+
+class InvalidOutput(StructuredGenerationError):
+    """The generator returned output that could not be validated as the requested schema."""
+
+
+class Unavailable(StructuredGenerationError):
+    """The generator could not be reached or could not complete due to service availability."""
+
+
+class RequestRejected(StructuredGenerationError):
+    """The generator rejected the request before producing structured output."""
+
+
 class StructuredGenerationRequest(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
         frozen=True,

@@ -12,6 +12,7 @@ from exeboard_ai.document_intelligence.summarization.chunk_summarizer import (
     CHUNK_SUMMARY_OUTPUT_SCHEMA_NAME,
     CHUNK_SUMMARY_OUTPUT_SCHEMA_VERSION,
     summarize_chunk,
+    summarize_chunk_run,
 )
 from exeboard_ai.document_intelligence.summarization.models import ChunkSummary
 from exeboard_ai.document_intelligence.summarization.ports import StructuredGenerationRequest
@@ -95,16 +96,11 @@ def _span_index(
     )
 
 
-def _chunk(
-    *,
-    source_span_ids: tuple[str, ...] | None = None,
-    page_numbers: tuple[int, ...] = (1,),
-    text: str = "Revenue increased by 10%.\nCosts declined.",
-) -> Chunk:
+def _chunk(*, source_span_ids: tuple[str, ...] | None = None, page_numbers: tuple[int, ...] = (1,)) -> Chunk:
     return Chunk(
         chunk_id=make_chunk_id(DOCUMENT_ID, 0),
         document_id=DOCUMENT_ID,
-        text=text,
+        text="Revenue increased by 10%.\nCosts declined.",
         page_numbers=page_numbers,
         source_span_ids=source_span_ids
         if source_span_ids is not None
@@ -153,6 +149,98 @@ def _summarize(
         generator=generator or FakeStructuredResponseGenerator(_generated_payload()),
         span_index=span_index or _span_index(),
     )
+
+
+def test_summarize_chunk_run_reports_generated_valid_and_assembly_dropped_claims() -> None:
+    generator = FakeStructuredResponseGenerator(
+        {
+            "claims": [
+                {
+                    "claim": "Revenue increased by 10%.",
+                    "claim_role": "finding",
+                    "importance": "high",
+                    "evidence": [
+                        {
+                            "quote": "Revenue increased by 10%.",
+                            "source_span_ids": (make_span_id(DOCUMENT_ID, 1, 0),),
+                        }
+                    ],
+                },
+                {
+                    "claim": "Invented quote claim.",
+                    "claim_role": "finding",
+                    "importance": "medium",
+                    "evidence": [
+                        {
+                            "quote": "Invented quote.",
+                            "source_span_ids": (make_span_id(DOCUMENT_ID, 1, 0),),
+                        }
+                    ],
+                },
+            ]
+        }
+    )
+
+    result = summarize_chunk_run(
+        chunk=_chunk(),
+        document_type="business_review",
+        generator=generator,
+        span_index=_span_index(),
+    )
+
+    assert [claim.claim for claim in result.summary.claims] == ["Revenue increased by 10%."]
+    assert result.report.claims_proposed == 2
+    assert result.report.evidence_proposed == 2
+    assert result.report.claims_assembled == 1
+    assert result.report.claims_valid == 1
+    assert len(result.report.drops) == 1
+    drop = result.report.drops[0]
+    assert drop.stage == "assembly_anchor"
+    assert drop.error_codes == ("quote_not_found",)
+    assert drop.proposal_index == 1
+    assert drop.generated_claim == "Invented quote claim."
+    assert drop.evidence_failures[0].quote == "Invented quote."
+    assert result.report.counts_by_error_code == {"quote_not_found": 1}
+
+
+def test_summarize_chunk_run_drops_multi_evidence_claim_once_with_failure_details() -> None:
+    generator = FakeStructuredResponseGenerator(
+        {
+            "claims": [
+                {
+                    "claim": "Revenue increased by 10% and invented quote.",
+                    "claim_role": "finding",
+                    "importance": "high",
+                    "evidence": [
+                        {
+                            "quote": "Revenue increased by 10%.",
+                            "source_span_ids": (make_span_id(DOCUMENT_ID, 1, 0),),
+                        },
+                        {
+                            "quote": "Invented quote.",
+                            "source_span_ids": (make_span_id(DOCUMENT_ID, 1, 0),),
+                        },
+                    ],
+                }
+            ]
+        }
+    )
+
+    result = summarize_chunk_run(
+        chunk=_chunk(),
+        document_type="business_review",
+        generator=generator,
+        span_index=_span_index(),
+    )
+
+    assert result.summary.claims == ()
+    assert result.report.claims_proposed == 1
+    assert result.report.evidence_proposed == 2
+    assert result.report.claims_valid == 0
+    assert len(result.report.drops) == 1
+    assert result.report.drops[0].error_codes == ("quote_not_found",)
+    assert result.report.drops[0].evidence_failures[0].evidence_index == 1
+    assert result.report.drops[0].evidence_failures[0].quote == "Invented quote."
 
 
 def test_summarize_chunk_sends_span_addressed_request_and_private_schema_to_generator() -> None:
@@ -260,59 +348,6 @@ def test_summarize_chunk_assembles_valid_generated_claim_with_trusted_page_and_l
     assert evidence.source_chunk_ids == (chunk.chunk_id,)
 
 
-def test_summarize_chunk_drops_generated_claim_when_evidence_cites_allowed_spans_across_pages() -> None:
-    chunk = _chunk(
-        source_span_ids=(
-            make_span_id(DOCUMENT_ID, 2, 0),
-            make_span_id(DOCUMENT_ID, 1, 1),
-        ),
-        page_numbers=(1, 2),
-    )
-    generator = FakeStructuredResponseGenerator(
-        _generated_payload(
-            quote="Revenue increased by 10%.",
-            source_span_ids=(
-                make_span_id(DOCUMENT_ID, 2, 0),
-                make_span_id(DOCUMENT_ID, 1, 1),
-            ),
-        )
-    )
-
-    summary = _summarize(
-        chunk=chunk,
-        generator=generator,
-        span_index=_span_index(first_page_number=2),
-    )
-
-    assert summary.claims == ()
-
-
-def test_summarize_chunk_uses_cited_allowed_span_page_for_multi_page_chunk() -> None:
-    chunk = _chunk(
-        source_span_ids=(
-            make_span_id(DOCUMENT_ID, 2, 0),
-            make_span_id(DOCUMENT_ID, 1, 1),
-        ),
-        page_numbers=(1, 2),
-    )
-    generator = FakeStructuredResponseGenerator(
-        _generated_payload(
-            quote="Revenue increased by 10%.",
-            source_span_ids=(make_span_id(DOCUMENT_ID, 2, 0),),
-        )
-    )
-
-    summary = _summarize(
-        chunk=chunk,
-        generator=generator,
-        span_index=_span_index(first_page_number=2),
-    )
-
-    assert len(summary.claims) == 1
-    assert summary.claims[0].evidence[0].page_number == 2
-    assert summary.claims[0].evidence[0].source_span_ids == (make_span_id(DOCUMENT_ID, 2, 0),)
-
-
 def test_summarize_chunk_accepts_empty_generated_claims() -> None:
     chunk = _chunk()
     generator = FakeStructuredResponseGenerator({"claims": []})
@@ -389,16 +424,15 @@ def test_summarize_chunk_preserves_exact_quote_whitespace_from_cited_span() -> N
 
 def test_summarize_chunk_sends_prompt_and_context_without_stripping_span_text() -> None:
     span_text = " Revenue increased by 10%. "
-    chunk = _chunk(text=f"{span_text}\nCosts declined.")
     generator = FakeStructuredResponseGenerator({"claims": []})
 
-    _summarize(chunk=chunk, generator=generator, span_index=_span_index(first_text=span_text))
+    _summarize(generator=generator, span_index=_span_index(first_text=span_text))
 
     assert generator.seen_request is not None
     assert isinstance(generator.seen_request.context, SpanAddressedChunkContext)
     assert generator.seen_request.context.allowed_spans[0].text == span_text
     assert f"text: {span_text}" in generator.seen_request.prompt
-    assert f"Chunk text:\n{chunk.text}" in generator.seen_request.prompt
+    assert f"Chunk text:\n{_chunk().text}" in generator.seen_request.prompt
 
 
 def test_summarize_chunk_drops_entire_claim_when_any_evidence_is_unsupported() -> None:
@@ -597,13 +631,63 @@ def test_summarize_chunk_replay_key_changes_when_allowed_span_page_changes() -> 
     assert first_generator.seen_request.replay_key != second_generator.seen_request.replay_key
 
 
-def test_summarize_chunk_rejects_generated_span_outside_allowed_context() -> None:
+@pytest.mark.parametrize("source_span_id", ["not-a-span-id", make_span_id(DOCUMENT_ID, 1, 99)])
+def test_summarize_chunk_run_drops_generated_span_outside_allowed_context(
+    source_span_id: str,
+) -> None:
     generator = FakeStructuredResponseGenerator(
-        _generated_payload(source_span_ids=(make_span_id(DOCUMENT_ID, 1, 99),))
+        _generated_payload(source_span_ids=(source_span_id,))
     )
 
-    with pytest.raises(ValueError, match="source_span_ids must belong to allowed chunk context"):
-        _summarize(generator=generator)
+    result = summarize_chunk_run(
+        chunk=_chunk(),
+        document_type="business_review",
+        generator=generator,
+        span_index=_span_index(),
+    )
+
+    assert result.summary.claims == ()
+    assert result.report.claims_proposed == 1
+    assert result.report.claims_assembled == 0
+    assert result.report.claims_valid == 0
+    assert len(result.report.drops) == 1
+    drop = result.report.drops[0]
+    assert drop.stage == "assembly_anchor"
+    assert drop.error_codes == ("source_span_not_in_chunk_context",)
+    assert drop.proposal_index == 0
+    assert drop.generated_claim == "Revenue increased by 10%."
+    assert drop.evidence_failures[0].error_code == "source_span_not_in_chunk_context"
+    assert drop.evidence_failures[0].quote == "Revenue increased by 10%."
+    assert drop.evidence_failures[0].source_span_ids == (source_span_id,)
+    assert result.report.counts_by_error_code == {"source_span_not_in_chunk_context": 1}
+
+
+def test_summarize_chunk_run_drops_generated_evidence_spanning_multiple_pages() -> None:
+    generator = FakeStructuredResponseGenerator(
+        _generated_payload(
+            source_span_ids=(make_span_id(DOCUMENT_ID, 2, 0), make_span_id(DOCUMENT_ID, 1, 1)),
+        )
+    )
+    chunk = _chunk(
+        source_span_ids=(make_span_id(DOCUMENT_ID, 2, 0), make_span_id(DOCUMENT_ID, 1, 1)),
+        page_numbers=(1, 2),
+    )
+
+    result = summarize_chunk_run(
+        chunk=chunk,
+        document_type="business_review",
+        generator=generator,
+        span_index=_span_index(first_page_number=2),
+    )
+
+    assert result.summary.claims == ()
+    assert result.report.claims_proposed == 1
+    assert result.report.claims_assembled == 0
+    assert result.report.claims_valid == 0
+    assert result.report.assembly_drop_count == 1
+    assert result.report.drops[0].error_codes == ("evidence_spans_cross_pages",)
+    assert result.report.drops[0].evidence_failures[0].error_code == "evidence_spans_cross_pages"
+    assert result.report.counts_by_error_code == {"evidence_spans_cross_pages": 1}
 
 
 def test_summarize_chunk_rejects_generated_page_number_field() -> None:

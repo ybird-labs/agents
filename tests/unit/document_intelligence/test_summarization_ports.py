@@ -4,8 +4,12 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from exeboard_ai.document_intelligence.summarization.ports import (
+    InvalidOutput,
+    RequestRejected,
+    StructuredGenerationError,
     StructuredGenerationRequest,
     StructuredResponseGenerator,
+    Unavailable,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -53,6 +57,16 @@ def _generate_with(
     output_model: type[T],
 ) -> T:
     return generator.generate(request=request, output_model=output_model)
+
+
+@pytest.mark.parametrize("error_type", [InvalidOutput, Unavailable, RequestRejected])
+def test_structured_generation_error_taxonomy_is_provider_agnostic(error_type: type[StructuredGenerationError]) -> None:
+    error = error_type("failed")
+
+    assert isinstance(error, StructuredGenerationError)
+    assert type(error).__module__ == "exeboard_ai.document_intelligence.summarization.ports"
+    assert not hasattr(error, "provider")
+    assert not hasattr(error, "model")
 
 
 def test_structured_response_generator_protocol_accepts_structural_generator() -> None:

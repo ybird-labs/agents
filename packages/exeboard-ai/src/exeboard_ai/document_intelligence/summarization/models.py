@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from exeboard_ai.document_intelligence.core.ids import (
     ChunkId,
@@ -36,6 +36,8 @@ ClaimRole = Literal[
 ]
 Importance = Literal["low", "medium", "high"]
 ValidationStatus = Literal["unvalidated", "valid", "invalid"]
+DropStage = Literal["assembly_anchor", "citation_validation", "quote_validation"]
+SummarizationRunStatus = Literal["completed", "zero_valid_claims"]
 
 DEFAULT_ALLOWED_CLAIM_ROLES_BY_DOCUMENT_TYPE: dict[DocumentType, frozenset[ClaimRole]] = {
     "generic": frozenset(
@@ -52,6 +54,185 @@ DEFAULT_ALLOWED_CLAIM_ROLES_BY_DOCUMENT_TYPE: dict[DocumentType, frozenset[Claim
         ["finding", "decision", "action_item", "risk", "open_question"]
     ),
 }
+
+class EvidenceFailureDetail(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    evidence_index: int = Field(ge=0)
+    error_code: str
+    quote: str | None = None
+    source_span_ids: tuple[SpanId, ...] = ()
+
+    @field_validator("error_code")
+    @classmethod
+    def _error_code_must_not_be_empty(cls, value: str) -> str:
+        if not value:
+            raise ValueError("error_code must not be empty")
+        return value
+
+    @field_validator("quote")
+    @classmethod
+    def _quote_must_not_be_empty_when_present(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("quote must not be empty")
+        return value
+
+    @field_validator("source_span_ids")
+    @classmethod
+    def _source_span_ids_must_not_contain_empty_values(
+        cls,
+        value: tuple[SpanId, ...],
+    ) -> tuple[SpanId, ...]:
+        if any(not span_id for span_id in value):
+            raise ValueError("source_span_ids must not contain empty values")
+        return value
+
+
+class DroppedClaimRecord(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    stage: DropStage
+    error_codes: tuple[str, ...]
+    chunk_id: ChunkId | None = None
+    proposal_index: int | None = Field(default=None, ge=0)
+    claim_id: ClaimId | None = None
+    generated_claim: str | None = None
+    evidence_failures: tuple[EvidenceFailureDetail, ...] = ()
+
+    @field_validator("error_codes")
+    @classmethod
+    def _error_codes_must_not_be_empty(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        _validate_non_empty_unique_tuple("error_codes", value)
+        return value
+
+    @field_validator("chunk_id")
+    @classmethod
+    def _validate_chunk_id(cls, value: str | None) -> ChunkId | None:
+        if value is None:
+            return None
+        _parse_chunk_id(value)
+        return value
+
+    @field_validator("claim_id")
+    @classmethod
+    def _validate_claim_id(cls, value: str | None) -> ClaimId | None:
+        if value is None:
+            return None
+        _parse_claim_id(value)
+        return value
+
+    @field_validator("generated_claim")
+    @classmethod
+    def _generated_claim_must_not_be_empty_when_present(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("generated_claim must not be empty")
+        return value
+
+
+class GroundingRunReport(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
+
+    claims_proposed: int = Field(ge=0)
+    evidence_proposed: int = Field(ge=0)
+    claims_assembled: int = Field(ge=0)
+    claims_valid: int = Field(ge=0)
+    drops: tuple[DroppedClaimRecord, ...] = ()
+    assembly_drop_count: int = Field(default=0, ge=0)
+    citation_validation_drop_count: int = Field(default=0, ge=0)
+    quote_validation_drop_count: int = Field(default=0, ge=0)
+    counts_by_error_code: dict[str, int] = Field(default_factory=dict)
+    parser_counters: dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("parser_counters")
+    @classmethod
+    def _parser_counters_must_be_non_negative(cls, value: dict[str, int]) -> dict[str, int]:
+        if any(not key or not key.strip() for key in value):
+            raise ValueError("parser_counters keys must not be empty")
+        if any(counter < 0 for counter in value.values()):
+            raise ValueError("parser_counters values must be non-negative")
+        return value
+
+    @field_validator("counts_by_error_code")
+    @classmethod
+    def _counts_by_error_code_must_be_non_negative(cls, value: dict[str, int]) -> dict[str, int]:
+        if any(not key or not key.strip() for key in value):
+            raise ValueError("counts_by_error_code keys must not be empty")
+        if any(counter < 0 for counter in value.values()):
+            raise ValueError("counts_by_error_code values must be non-negative")
+        return value
+
+    @property
+    def drop_rate(self) -> float:
+        if self.claims_proposed == 0:
+            return 0.0
+        return len(self.drops) / self.claims_proposed
+
+    @model_validator(mode="after")
+    def _validate_report(self) -> GroundingRunReport:
+        assembly_drop_count = _count_drops_by_stage(self.drops, "assembly_anchor")
+        citation_validation_drop_count = _count_drops_by_stage(self.drops, "citation_validation")
+        quote_validation_drop_count = _count_drops_by_stage(self.drops, "quote_validation")
+        validation_drop_count = citation_validation_drop_count + quote_validation_drop_count
+
+        if (
+            "assembly_drop_count" in self.model_fields_set
+            and self.assembly_drop_count != assembly_drop_count
+        ):
+            raise ValueError("assembly_drop_count must match drops")
+        if (
+            "citation_validation_drop_count" in self.model_fields_set
+            and self.citation_validation_drop_count != citation_validation_drop_count
+        ):
+            raise ValueError("citation_validation_drop_count must match drops")
+        if (
+            "quote_validation_drop_count" in self.model_fields_set
+            and self.quote_validation_drop_count != quote_validation_drop_count
+        ):
+            raise ValueError("quote_validation_drop_count must match drops")
+
+        derived_counts: dict[str, int] = {}
+        for drop in self.drops:
+            for error_code in drop.error_codes:
+                derived_counts[error_code] = derived_counts.get(error_code, 0) + 1
+        if "counts_by_error_code" in self.model_fields_set and self.counts_by_error_code != derived_counts:
+            raise ValueError("counts_by_error_code must match drops")
+
+        if self.claims_assembled > self.claims_proposed:
+            raise ValueError("claims_assembled must not exceed claims_proposed")
+        if self.claims_valid > self.claims_assembled:
+            raise ValueError("claims_valid must not exceed claims_assembled")
+        if self.claims_assembled != self.claims_proposed - assembly_drop_count:
+            raise ValueError("claims_assembled must equal claims_proposed minus assembly drops")
+        if self.claims_valid != self.claims_assembled - validation_drop_count:
+            raise ValueError("claims_valid must equal claims_assembled minus validation drops")
+        if self.claims_proposed != self.claims_valid + len(self.drops):
+            raise ValueError("claims_proposed must equal claims_valid plus dropped claims")
+
+        object.__setattr__(self, "assembly_drop_count", assembly_drop_count)
+        object.__setattr__(
+            self,
+            "citation_validation_drop_count",
+            citation_validation_drop_count,
+        )
+        object.__setattr__(
+            self,
+            "quote_validation_drop_count",
+            quote_validation_drop_count,
+        )
+        object.__setattr__(self, "counts_by_error_code", derived_counts)
+        return self
+
 
 class ClaimEvidence(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -264,6 +445,36 @@ class DocumentSummary(BaseModel):
                     raise ValueError("supporting_claim_ids must reference existing claims")
 
         return self
+
+
+class SummarizationRunResult(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True,
+        extra="forbid",
+    )
+
+    summary: DocumentSummary | None
+    report: GroundingRunReport
+    status: SummarizationRunStatus
+
+    @model_validator(mode="after")
+    def _validate_result(self) -> SummarizationRunResult:
+        if self.summary is None:
+            if self.status != "zero_valid_claims":
+                raise ValueError("summary=None requires zero_valid_claims status")
+            if self.report.claims_valid != 0:
+                raise ValueError("summary=None requires zero valid claims")
+            return self
+
+        if self.status == "zero_valid_claims":
+            raise ValueError("zero_valid_claims status requires summary=None")
+        if len(self.summary.claims) != self.report.claims_valid:
+            raise ValueError("summary claims must match report claims_valid")
+        return self
+
+
+def _count_drops_by_stage(drops: tuple[DroppedClaimRecord, ...], stage: DropStage) -> int:
+    return sum(1 for drop in drops if drop.stage == stage)
 
 
 def _parse_claim_id(claim_id: ClaimId) -> DocumentId:

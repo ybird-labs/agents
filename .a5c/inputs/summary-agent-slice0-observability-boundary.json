@@ -1,0 +1,38 @@
+{
+  "goal": "Implement Slice 0 from docs/document-intelligence/summary-agent-improved-plan.md: grounding observability plus LLM-boundary guardrails before live-model measurement.",
+  "approvedByUser": false,
+  "projectRoot": "/Users/jeancarlobarrios/Developing/exeboard/ai",
+  "planFiles": [
+    "docs/document-intelligence/summary-agent-improved-plan.md",
+    ".a5c/processes/summary-agent-slice0-observability-boundary.process.md",
+    ".a5c/processes/summary-agent-slice0-observability-boundary.mermaid.md",
+    ".a5c/processes/summary-agent-slice0-observability-boundary.js"
+  ],
+  "researchFiles": [
+    "deep-research/external-best-practices.md",
+    "deep-research/local-implementation-gap-analysis.md",
+    "deep-research/summary-model-plan-review.md",
+    "deep-research/llm-boundary-plan-review.md",
+    "deep-research/validation-grounding-plan-review.md"
+  ],
+  "sliceScope": {
+    "inScope": [
+      "SummarizationRunResult and minimal GroundingRunReport",
+      "DroppedClaimRecord / drop accounting for generated proposals",
+      "claims_proposed == claims_valid + len(drops) conservation invariant",
+      "explicit zero-valid-claim outcome",
+      "StructuredGenerationError taxonomy",
+      "import-boundary tests for provider SDK / pydantic_ai / exeboard_integrations leakage"
+    ],
+    "outOfScope": [
+      "canonical quote anchoring",
+      "live provider adapter",
+      "strict replay",
+      "eval-stage judge",
+      "app/API/UI",
+      "Docling adapter or OCR",
+      "database/Temporal/workers",
+      "fuzzy/page-scope validity expansion"
+    ]
+  }
+}
